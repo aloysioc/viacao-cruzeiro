@@ -769,7 +769,7 @@ def _build_insight_text(
 
 
 @app.function_name(name="process_csv")
-@app.schedule(schedule="0 0 18 * * *", arg_name="mytimer", run_on_startup=True)
+@app.schedule(schedule="0 0 18 * * *", arg_name="mytimer", run_on_startup=False)
 def process_csv(mytimer: func.TimerRequest) -> None:
 
     logging.info("Iniciando processamento por destinatario")
