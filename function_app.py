@@ -6,6 +6,7 @@ import time
 import json
 import urllib.request
 import urllib.error
+import unicodedata
 
 from azure.identity import DefaultAzureCredential
 from azure.storage.filedatalake import DataLakeServiceClient
@@ -35,8 +36,13 @@ INSIGHTS_SOURCE_FILENAME = os.getenv("INSIGHTS_SOURCE_FILENAME", "").strip()
 
 _INSIGHTS_REQUIRED_COLUMNS = [
     "Unidade Emissora", "unidade emissora", "unidade emissora ", "unidade",
+    "Unidade Receptora", "unidade receptora",
+    "UF Destinatario", "UF do Destinatario", "UF destino", "UF de destino",
+    "UF Remetente", "UF do Remetente", "UF Origem", "UF de origem",
+    "UF Receptora", "UF da Unidade Receptora", "UF Recebedora",
     "Cidade do Remetente", "cidade do remetente",
     "Tipo do Frete", "tipo do frete",
+    "Tipo de Baixa", "tipo de baixa",
     "Data de Emissao", "data de emissao",
     "Valor do Frete", "valor do frete",
     "Valor Liquidado", "valor liquidado",
@@ -93,12 +99,12 @@ def _read_csv_from_datalake(
 
 
 def _pick_insights_columns(columns: list[str]) -> list[str]:
-    normalized_candidates = {str(c).strip().lower() for c in _INSIGHTS_REQUIRED_COLUMNS}
-    normalized_preferred = {str(c).strip().lower() for c in _PREFERRED_METRIC_COLUMNS}
+    normalized_candidates = {_normalize_header_name(c) for c in _INSIGHTS_REQUIRED_COLUMNS}
+    normalized_preferred = {_normalize_header_name(c) for c in _PREFERRED_METRIC_COLUMNS}
 
     selected = []
     for col in columns:
-        col_norm = str(col).strip().lower()
+        col_norm = _normalize_header_name(col)
         if col_norm in normalized_candidates or col_norm in normalized_preferred:
             selected.append(col)
 
@@ -201,10 +207,22 @@ def _load_insights_from_datalake(
     return merged, source_paths
 
 
+def _normalize_header_name(value: str) -> str:
+    text = unicodedata.normalize("NFKD", str(value))
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    text = text.lower().strip()
+
+    for sep in ["/", "-", "_", "|"]:
+        text = text.replace(sep, " ")
+
+    text = "".join(ch if ch.isalnum() or ch.isspace() else " " for ch in text)
+    return " ".join(text.split())
+
+
 def _find_column(df: pd.DataFrame, candidates: list[str]) -> str | None:
-    normalized = {str(col).strip().lower(): col for col in df.columns}
+    normalized = {_normalize_header_name(col): col for col in df.columns}
     for candidate in candidates:
-        col = normalized.get(candidate.lower())
+        col = normalized.get(_normalize_header_name(candidate))
         if col is not None:
             return col
     return None
@@ -258,10 +276,103 @@ def _format_number_ptbr(value: float) -> str:
     return formatted.replace(",", "_").replace(".", ",").replace("_", ".")
 
 
+def _parse_brl_to_float(value: str) -> float:
+    text = str(value).replace("R$", "").strip()
+    text = text.replace(".", "").replace(",", ".")
+    try:
+        return float(text)
+    except ValueError:
+        return 0.0
+
+
+def _parse_percent_to_float(value: str) -> float:
+    text = str(value).replace("%", "").strip()
+    try:
+        return float(text)
+    except ValueError:
+        return 0.0
+
+
 def _safe_growth_percent(old_value: float, new_value: float) -> str:
     if old_value == 0:
         return "-"
     return f"{((new_value / old_value) - 1) * 100:.0f}%"
+
+
+def _build_soft_operational_comment(
+    table_data: list[list[str]],
+    filial: str,
+    bloco_nome: str,
+) -> str:
+    if len(table_data) < 2:
+        return ""
+
+    total_row = table_data[1]
+    if len(total_row) >= 6:
+        valor_ano1 = str(total_row[2])
+        valor_ano2 = str(total_row[4])
+        desempenho = str(total_row[5])
+    elif len(total_row) >= 4:
+        valor_ano1 = str(total_row[1])
+        valor_ano2 = str(total_row[2])
+        desempenho = str(total_row[3])
+    else:
+        return ""
+
+    growth = _parse_percent_to_float(desempenho)
+    bloco_txt = bloco_nome.lower()
+
+    if growth > 0:
+        return (
+            f"No consolidado de {bloco_txt}, a filial {filial.upper()} apresentou crescimento de {desempenho}, "
+            f"com evolucao de {valor_ano1} para {valor_ano2} no periodo analisado."
+        )
+    if growth < 0:
+        return (
+            f"No consolidado de {bloco_txt}, a filial {filial.upper()} registrou uma acomodacao de {abs(growth):.0f}%, "
+            f"com variacao de {valor_ano1} para {valor_ano2}, indicando oportunidade de acompanhamento operacional."
+        )
+    return (
+        f"No consolidado de {bloco_txt}, a filial {filial.upper()} manteve estabilidade no periodo, "
+        f"com resultado de {valor_ano1} para {valor_ano2}."
+    )
+
+
+def _draw_wrapped_text(
+    pdf: canvas.Canvas,
+    text: str,
+    y_start: float,
+    x: float = 50,
+    max_width: float = 520,
+    font_name: str = "Helvetica",
+    font_size: float = 8.5,
+    line_height: float = 10.5,
+) -> float:
+    if not text:
+        return y_start
+
+    pdf.setFont(font_name, font_size)
+    words = text.split()
+    if not words:
+        return y_start
+
+    lines = []
+    current = words[0]
+    for word in words[1:]:
+        probe = f"{current} {word}"
+        if pdf.stringWidth(probe, font_name, font_size) <= max_width:
+            current = probe
+        else:
+            lines.append(current)
+            current = word
+    lines.append(current)
+
+    y = y_start
+    for line in lines:
+        pdf.drawString(x, y, line)
+        y -= line_height
+
+    return y
 
 
 def _classify_metric_type(metric_name: str) -> str:
@@ -367,33 +478,44 @@ def _group_tipo_frete(tipo: str) -> str | None:
     return None
 
 
+def _compute_valor_frete_final(df: pd.DataFrame) -> pd.Series:
+    tipo_baixa_col = _find_column(df, ["Tipo de Baixa", "tipo de baixa"])
+    frete_col = _find_column(df, ["Valor do Frete", "valor do frete"])
+    liquidado_col = _find_column(df, ["Valor Liquidado", "valor liquidado"])
+
+    base_nan = pd.Series(float("nan"), index=df.index, dtype="float64")
+    valor_frete = _parse_br_numeric(df[frete_col]) if frete_col else base_nan.copy()
+    valor_liquidado = _parse_br_numeric(df[liquidado_col]) if liquidado_col else base_nan.copy()
+
+    if tipo_baixa_col and liquidado_col:
+        tipo_baixa = df[tipo_baixa_col].astype(str).str.strip().str.upper()
+        is_liquidado = tipo_baixa.str.contains("LIQUIDADO", na=False)
+        valor_final = valor_frete.where(~is_liquidado, valor_liquidado)
+    else:
+        valor_final = valor_frete if frete_col else valor_liquidado
+
+    return valor_final.fillna(valor_frete).fillna(valor_liquidado)
+
+
+def _extract_ano_series(df: pd.DataFrame, date_col: str) -> pd.Series:
+    parsed_dates = pd.to_datetime(df[date_col], format="%d/%m/%y", errors="coerce")
+    if parsed_dates.isna().all():
+        parsed_dates = pd.to_datetime(df[date_col], format="%d/%m/%Y", errors="coerce")
+    return parsed_dates.dt.year
+
+
 def _build_frete_tables(branch_df: pd.DataFrame) -> str:
     tipo_col = _find_column(branch_df, ["Tipo do Frete", "tipo do frete"])
     date_col = _find_column(branch_df, ["Data de Emissao", "data de emissao"])
-    value_col = _find_column(branch_df, ["Valor do Frete", "Valor Liquidado", "valor do frete", "valor liquidado"])
-    
-    # Tenta detectar coluna de tipo de movimentação (Recebido/Expedido)
-    movement_col = _find_column(branch_df, [
-        "Tipo de Movimentacao", "tipo de movimentacao", "tipo movimentacao",
-        "Direcao", "direcao", "Entrada/Saida", "entrada saida",
-        "Recebido/Expedido", "recebido expedido",
-        "Status Operacao", "status operacao"
-    ])
 
-    if not tipo_col or not date_col or not value_col:
+    if not tipo_col or not date_col:
         return ""
 
-    tmp = branch_df[[tipo_col, date_col, value_col]].copy()
-    if movement_col:
-        tmp["movimento"] = branch_df[movement_col]
-    
+    tmp = branch_df[[tipo_col, date_col]].copy()
     tmp["tipo"] = tmp[tipo_col].apply(_normalize_tipo_frete)
     tmp["grupo"] = tmp["tipo"].apply(lambda v: _group_tipo_frete(v) if v else None)
-    tmp["valor"] = _parse_br_numeric(tmp[value_col])
-    parsed_dates = pd.to_datetime(tmp[date_col], format="%d/%m/%y", errors="coerce")
-    if parsed_dates.isna().all():
-        parsed_dates = pd.to_datetime(tmp[date_col], format="%d/%m/%Y", errors="coerce")
-    tmp["ano"] = parsed_dates.dt.year
+    tmp["valor"] = _compute_valor_frete_final(branch_df)
+    tmp["ano"] = _extract_ano_series(tmp, date_col)
 
     tmp = tmp.dropna(subset=["grupo", "valor", "ano"])
     if tmp.empty:
@@ -414,83 +536,13 @@ def _build_frete_tables(branch_df: pd.DataFrame) -> str:
         v2 = float(frame.loc[frame["ano"] == y2, "valor"].sum())
         return label, q1, v1, q2, v2, _safe_growth_percent(v1, v2)
 
-    def _build_period_section(label: str, data: pd.DataFrame) -> str:
-        if data.empty:
-            return ""
-        
-        section_lines = []
-        if label:
-            section_lines.append(f"{label}")
-        section_lines.append("Linha | " + str(y1) + " Qtd | " + str(y1) + " Valor | " + str(y2) + " Qtd | " + str(y2) + " Valor | Desempenho")
-        
-        total = _agg_line("TOTAL", data)
-        cif = _agg_line("CIF", data[data["grupo"] == "CIF"])
-        fob = _agg_line("FOB", data[data["grupo"] == "FOB"])
-        
-        for item_label, q1, v1, q2, v2, perf in [total, cif, fob]:
-            section_lines.append(
-                f"{item_label} | {q1} | {_format_brl(v1)} | {q2} | {_format_brl(v2)} | {perf}"
-            )
-        return "\n".join(section_lines)
-
     lines = []
-    
-    # Se houver movimento, segregar por tipo
-    if movement_col and "movimento" in period_df.columns:
-        movement_values = period_df["movimento"].astype(str).str.strip().str.lower().unique()
-        
-        # Normaliza valores de movimento
-        recebidos_keywords = {"recebido", "entrada", "in", "received"}
-        expedidos_keywords = {"expedido", "saida", "out", "shipped"}
-        
-        has_recebidos = any(any(kw in val for kw in recebidos_keywords) for val in movement_values)
-        has_expedidos = any(any(kw in val for kw in expedidos_keywords) for val in movement_values)
-        
-        if has_recebidos or has_expedidos:
-            lines.append(f"Resumo por Tipo do Frete ({y1} x {y2})")
-            lines.append("Linha | " + str(y1) + " Qtd | " + str(y1) + " Valor | " + str(y2) + " Qtd | " + str(y2) + " Valor | Desempenho")
-            total_line = _agg_line("TOTAL", period_df)
-            cif_line = _agg_line("CIF", period_df[period_df["grupo"] == "CIF"])
-            fob_line = _agg_line("FOB", period_df[period_df["grupo"] == "FOB"])
-            
-            for label, q1, v1, q2, v2, perf in [total_line, cif_line, fob_line]:
-                lines.append(
-                    f"{label} | {q1} | {_format_brl(v1)} | {q2} | {_format_brl(v2)} | {perf}"
-                )
-            
-            if has_recebidos:
-                lines.append("")
-                recebidos_df = period_df[
-                    period_df["movimento"].astype(str).str.lower().str.contains("|".join(recebidos_keywords), na=False)
-                ]
-                recebidos_section = _build_period_section("RECEBIDOS", recebidos_df)
-                if recebidos_section:
-                    lines.append(recebidos_section)
-            
-            if has_expedidos:
-                lines.append("")
-                expedidos_df = period_df[
-                    period_df["movimento"].astype(str).str.lower().str.contains("|".join(expedidos_keywords), na=False)
-                ]
-                expedidos_section = _build_period_section("EXPEDIDOS", expedidos_df)
-                if expedidos_section:
-                    lines.append(expedidos_section)
-        else:
-            # Sem movimento claro, usar formato padrão
-            lines.append(f"Resumo por Tipo do Frete ({y1} x {y2})")
-            lines.append("Linha | " + str(y1) + " Qtd | " + str(y1) + " Valor | " + str(y2) + " Qtd | " + str(y2) + " Valor | Desempenho")
-            for label, q1, v1, q2, v2, perf in [_agg_line("TOTAL", period_df), _agg_line("CIF", period_df[period_df["grupo"] == "CIF"]), _agg_line("FOB", period_df[period_df["grupo"] == "FOB"])]:
-                lines.append(
-                    f"{label} | {q1} | {_format_brl(v1)} | {q2} | {_format_brl(v2)} | {perf}"
-                )
-    else:
-        # Sem coluna de movimento, usar formato padrão
-        lines.append(f"Resumo por Tipo do Frete ({y1} x {y2})")
-        lines.append("Linha | " + str(y1) + " Qtd | " + str(y1) + " Valor | " + str(y2) + " Qtd | " + str(y2) + " Valor | Desempenho")
-        for label, q1, v1, q2, v2, perf in [_agg_line("TOTAL", period_df), _agg_line("CIF", period_df[period_df["grupo"] == "CIF"]), _agg_line("FOB", period_df[period_df["grupo"] == "FOB"])]:
-            lines.append(
-                f"{label} | {q1} | {_format_brl(v1)} | {q2} | {_format_brl(v2)} | {perf}"
-            )
+    lines.append(f"Resumo por Tipo do Frete ({y1} x {y2})")
+    lines.append("Linha | " + str(y1) + " Qtd | " + str(y1) + " Valor | " + str(y2) + " Qtd | " + str(y2) + " Valor | Desempenho")
+    for label, q1, v1, q2, v2, perf in [_agg_line("TOTAL", period_df), _agg_line("CIF", period_df[period_df["grupo"] == "CIF"]), _agg_line("FOB", period_df[period_df["grupo"] == "FOB"])]:
+        lines.append(
+            f"{label} | {q1} | {_format_brl(v1)} | {q2} | {_format_brl(v2)} | {perf}"
+        )
 
     lines.append("")
     lines.append("Detalhe de codigos (CV/CP/FV/FP)")
@@ -504,15 +556,253 @@ def _build_frete_tables(branch_df: pd.DataFrame) -> str:
     return "\n".join(lines)
 
 
-def _extract_frete_tables_for_pdf(insight_text: str) -> tuple[list[list[str]], list[list[str]], list[str]]:
+def _build_expedidos_recebidos_tables(
+    totals_df: pd.DataFrame,
+    filial: str,
+) -> str:
+    if totals_df.empty:
+        return ""
+
+    unidade_emissora_col = _find_column(totals_df, ["Unidade Emissora", "unidade emissora", "unidade emissora ", "unidade"])
+    unidade_receptora_col = _find_column(totals_df, ["Unidade Receptora", "unidade receptora"])
+    date_col = _find_column(totals_df, ["Data de Emissao", "data de emissao"])
+    if not unidade_emissora_col or not unidade_receptora_col or not date_col:
+        return ""
+
+    tipo_frete_col = _find_column(totals_df, ["Tipo do Frete", "tipo do frete"])
+
+    tmp = totals_df[[unidade_emissora_col, unidade_receptora_col, date_col]].copy()
+    if tipo_frete_col:
+        tmp["tipo_frete"] = totals_df[tipo_frete_col]
+    else:
+        tmp["tipo_frete"] = ""
+    tmp["valor_final"] = _compute_valor_frete_final(totals_df)
+    tmp["ano"] = _extract_ano_series(tmp, date_col)
+    tmp = tmp.dropna(subset=["valor_final", "ano"])
+    if tmp.empty:
+        return ""
+
+    filial_norm = str(filial).strip().casefold()
+    lines: list[str] = []
+
+    def _append_compact_table(section_title: str, frame: pd.DataFrame) -> None:
+        if frame.empty:
+            return
+
+        frame = frame.copy()
+        years = sorted(frame["ano"].astype(int).unique().tolist())
+        if not years:
+            return
+        if len(years) == 1:
+            y1, y2 = years[0], years[0]
+        else:
+            y1, y2 = years[-2], years[-1]
+
+        frame = frame[frame["ano"].isin({y1, y2})].copy()
+        if frame.empty:
+            return
+
+        frame["tipo_normalizado"] = frame["tipo_frete"].apply(_normalize_tipo_frete)
+        frame["grupo"] = frame["tipo_normalizado"].apply(lambda v: _group_tipo_frete(v) if v else None)
+
+        def _line(label: str, data: pd.DataFrame) -> str:
+            q1 = int((data["ano"] == y1).sum())
+            q2 = int((data["ano"] == y2).sum())
+            v1 = float(data.loc[data["ano"] == y1, "valor_final"].sum())
+            v2 = float(data.loc[data["ano"] == y2, "valor_final"].sum())
+            return f"{label} | {q1} | {_format_brl(v1)} | {q2} | {_format_brl(v2)} | {_safe_growth_percent(v1, v2)}"
+
+        if lines:
+            lines.append("")
+        lines.append(section_title)
+        lines.append("Linha | " + str(y1) + " Qtd | " + str(y1) + " Valor | " + str(y2) + " Qtd | " + str(y2) + " Valor | Desempenho")
+        lines.append(_line("TOTAL", frame))
+        lines.append(_line("CIF", frame[frame["grupo"] == "CIF"]))
+        lines.append(_line("FOB", frame[frame["grupo"] == "FOB"]))
+
+    expedidos_df = tmp[
+        tmp[unidade_emissora_col].astype(str).str.strip().str.casefold() == filial_norm
+    ].copy()
+    _append_compact_table("Tabela de Valores Expedidos (Frete Final)", expedidos_df)
+
+    recebidos_df = tmp[
+        tmp[unidade_receptora_col].astype(str).str.strip().str.casefold() == filial_norm
+    ].copy()
+    _append_compact_table("Tabela de Valores Recebidos (Frete Final)", recebidos_df)
+
+    return "\n".join(lines)
+
+
+def _build_filial_scope_df(totals_df: pd.DataFrame, filial: str) -> pd.DataFrame:
+    if totals_df.empty:
+        return pd.DataFrame()
+
+    unidade_emissora_col = _find_column(totals_df, ["Unidade Emissora", "unidade emissora", "unidade emissora ", "unidade"])
+    unidade_receptora_col = _find_column(totals_df, ["Unidade Receptora", "unidade receptora"])
+    if not unidade_emissora_col or not unidade_receptora_col:
+        return pd.DataFrame()
+
+    filial_norm = str(filial).strip().casefold()
+    mask_exp = totals_df[unidade_emissora_col].astype(str).str.strip().str.casefold() == filial_norm
+    mask_rec = totals_df[unidade_receptora_col].astype(str).str.strip().str.casefold() == filial_norm
+
+    scoped = totals_df[mask_exp | mask_rec].copy()
+    if scoped.empty:
+        return scoped
+
+    movement_col = _find_column(
+        scoped,
+        [
+            "Tipo de Movimentacao", "tipo de movimentacao", "tipo movimentacao",
+            "Direcao", "direcao", "Entrada/Saida", "entrada saida",
+            "Recebido/Expedido", "recebido expedido",
+            "Status Operacao", "status operacao",
+        ],
+    )
+    if not movement_col:
+        movement_col = "Recebido/Expedido"
+        scoped[movement_col] = ""
+
+    scoped.loc[mask_exp.loc[scoped.index] & ~mask_rec.loc[scoped.index], movement_col] = "EXPEDIDO"
+    scoped.loc[mask_rec.loc[scoped.index] & ~mask_exp.loc[scoped.index], movement_col] = "RECEBIDO"
+    scoped.loc[mask_rec.loc[scoped.index] & mask_exp.loc[scoped.index], movement_col] = "INTERNO"
+    return scoped
+
+
+def _build_uf_emphasis_table(
+    totals_df: pd.DataFrame,
+    filial: str,
+) -> str:
+    if totals_df.empty:
+        return ""
+
+    unidade_emissora_col = _find_column(totals_df, ["Unidade Emissora", "unidade emissora", "unidade emissora ", "unidade"])
+    unidade_receptora_col = _find_column(totals_df, ["Unidade Receptora", "unidade receptora"])
+    date_col = _find_column(totals_df, ["Data de Emissao", "data de emissao"])
+    uf_dest_col = _find_column(
+        totals_df,
+        [
+            "UF Destinatario", "UF do Destinatario", "UF destino", "UF de destino",
+            "UF Receptora", "UF da Unidade Receptora", "UF Recebedora",
+        ],
+    )
+    uf_orig_col = _find_column(
+        totals_df,
+        [
+            "UF do remetente", "UF Remetente", "UF origem", "UF de origem",
+            "UF Origem", "UF",
+        ],
+    )
+
+    if not unidade_emissora_col or not unidade_receptora_col or not date_col:
+        return ""
+
+    filial_norm = str(filial).strip().casefold()
+    expedidos_df = totals_df[
+        totals_df[unidade_emissora_col].astype(str).str.strip().str.casefold() == filial_norm
+    ].copy()
+    recebidos_df = totals_df[
+        totals_df[unidade_receptora_col].astype(str).str.strip().str.casefold() == filial_norm
+    ].copy()
+
+    parts = []
+    if uf_dest_col and not expedidos_df.empty:
+        exp = expedidos_df.copy()
+        exp["uf"] = exp[uf_dest_col].astype(str).str.strip().str.upper()
+        parts.append(exp)
+
+    if uf_orig_col and not recebidos_df.empty:
+        rec = recebidos_df.copy()
+        rec["uf"] = rec[uf_orig_col].astype(str).str.strip().str.upper()
+        parts.append(rec)
+
+    if not parts:
+        return ""
+
+    tmp = pd.concat(parts, ignore_index=False, sort=False)
+
+    tmp["valor_final"] = _compute_valor_frete_final(tmp)
+    tmp["ano"] = _extract_ano_series(tmp, date_col)
+    tmp = tmp.dropna(subset=["valor_final", "ano"])
+    tmp = tmp[tmp["uf"] != ""]
+    if tmp.empty:
+        return ""
+
+    years = sorted(tmp["ano"].astype(int).unique().tolist())
+    if len(years) == 1:
+        y1, y2 = years[0], years[0]
+    else:
+        y1, y2 = years[-2], years[-1]
+
+    tmp = tmp[tmp["ano"].isin({y1, y2})].copy()
+    if tmp.empty:
+        return ""
+
+    pivot = tmp.groupby(["uf", "ano"]) ["valor_final"].sum().unstack(fill_value=0.0)
+    if y1 not in pivot.columns:
+        pivot[y1] = 0.0
+    if y2 not in pivot.columns:
+        pivot[y2] = 0.0
+    pivot = pivot[[y1, y2]].sort_values(by=y2, ascending=False)
+
+    max_ufs = 6
+    display_rows = pivot.head(max_ufs)
+    if len(pivot) > max_ufs:
+        others = pivot.iloc[max_ufs:].sum(axis=0)
+        display_rows.loc["OUTROS"] = others
+
+    lines = []
+    lines.append("Tabela de Valores por UF (Frete Final)")
+    lines.append("Linha | " + str(y1) + " Valor | " + str(y2) + " Valor | Desempenho")
+
+    total_y1 = float(tmp.loc[tmp["ano"] == y1, "valor_final"].sum())
+    total_y2 = float(tmp.loc[tmp["ano"] == y2, "valor_final"].sum())
+    lines.append(f"TOTAL | {_format_brl(total_y1)} | {_format_brl(total_y2)} | {_safe_growth_percent(total_y1, total_y2)}")
+
+    for uf, row in display_rows.iterrows():
+        v1 = float(row[y1])
+        v2 = float(row[y2])
+        lines.append(f"{uf} | {_format_brl(v1)} | {_format_brl(v2)} | {_safe_growth_percent(v1, v2)}")
+
+    return "\n".join(lines)
+
+
+def _extract_frete_tables_for_pdf(
+    insight_text: str,
+) -> tuple[list[list[str]], list[list[str]], list[list[str]], list[list[str]], list[list[str]], list[str]]:
     summary_table: list[list[str]] = []
     detail_table: list[list[str]] = []
+    expedidos_table: list[list[str]] = []
+    recebidos_table: list[list[str]] = []
+    uf_table: list[list[str]] = []
     metric_lines: list[str] = []
 
     section = None
     for raw_line in insight_text.splitlines():
         line = raw_line.strip()
         if not line:
+            continue
+
+        if line.startswith("Tabela de Valores Expedidos"):
+            section = "expedidos"
+            continue
+
+        if line.startswith("Tabela de Valores Recebidos"):
+            section = "recebidos"
+            continue
+
+        if line.startswith("Tabela de Valores por UF"):
+            section = "uf"
+            continue
+
+        if line.startswith("Linha |") and section in {"expedidos", "recebidos", "uf"}:
+            row = [cell.strip() for cell in line.split("|")]
+            if section == "expedidos":
+                expedidos_table.append(row)
+            elif section == "recebidos":
+                recebidos_table.append(row)
+            else:
+                uf_table.append(row)
             continue
 
         if line.startswith("Linha |"):
@@ -529,18 +819,24 @@ def _extract_frete_tables_for_pdf(insight_text: str) -> tuple[list[list[str]], l
             section = "metrics"
             continue
 
-        if section in {"summary", "detail"} and "|" in line:
+        if section in {"summary", "detail", "expedidos", "recebidos", "uf"} and "|" in line:
             row = [cell.strip() for cell in line.split("|")]
             if section == "summary":
                 summary_table.append(row)
-            else:
+            elif section == "detail":
                 detail_table.append(row)
+            elif section == "expedidos":
+                expedidos_table.append(row)
+            elif section == "recebidos":
+                recebidos_table.append(row)
+            else:
+                uf_table.append(row)
             continue
 
         if section == "metrics" and line.startswith("-"):
             metric_lines.append(line)
 
-    return summary_table, detail_table, metric_lines
+    return summary_table, detail_table, expedidos_table, recebidos_table, uf_table, metric_lines
 
 
 def _draw_table_on_canvas(pdf: canvas.Canvas, title: str, table_data: list[list[str]], y_start: float) -> float:
@@ -553,6 +849,10 @@ def _draw_table_on_canvas(pdf: canvas.Canvas, title: str, table_data: list[list[
     col_count = len(table_data[0])
     if col_count == 6:
         col_widths = [90, 60, 105, 60, 105, 80]
+    elif col_count == 4:
+        col_widths = [120, 130, 130, 120]
+    elif col_count == 3:
+        col_widths = [180, 120, 200]
     else:
         col_widths = [500 / max(col_count, 1)] * col_count
 
@@ -582,6 +882,8 @@ def _draw_summary_table_example_layout(
     filial: str,
     summary_table: list[list[str]],
     y_start: float,
+    bloco_titulo: str = "TOTAL",
+    secao_titulo: str = "Resumo por Tipo do Frete",
 ) -> float:
     if len(summary_table) < 2:
         return y_start
@@ -591,17 +893,28 @@ def _draw_summary_table_example_layout(
     y2 = header[3].split()[0] if len(header) > 3 else "Ano2"
 
     table_data = [
-        ["FILIAL", "TOTAL", "", "", "", "DESEMPENHO"],
+        ["FILIAL", bloco_titulo, "", "", "", "DESEMPENHO"],
         ["", y1, "", y2, "", ""],
         ["", "Quantidade", "Valor", "Quantidade", "Valor", ""],
     ]
 
+    ordered_labels = ["TOTAL", "CIF", "FOB"]
+    rows_by_label: dict[str, list[str]] = {}
     for row in summary_table[1:]:
         if len(row) >= 6:
-            table_data.append([row[0], row[1], row[2], row[3], row[4], row[5]])
+            label = str(row[0]).strip().upper()
+            if label in ordered_labels and label not in rows_by_label:
+                rows_by_label[label] = row
+
+    for label in ordered_labels:
+        row = rows_by_label.get(label)
+        if not row:
+            continue
+        display_label = filial.upper() if label == "TOTAL" else label
+        table_data.append([display_label, row[1], row[2], row[3], row[4], row[5]])
 
     pdf.setFont("Helvetica-Bold", 10)
-    pdf.drawString(50, y_start - 4, "Resumo por Tipo do Frete")
+    pdf.drawString(50, y_start - 4, secao_titulo)
 
     col_widths = [120, 70, 95, 70, 95, 90]
     table = Table(table_data, colWidths=col_widths)
@@ -631,22 +944,67 @@ def _draw_summary_table_example_layout(
     return y_start - 40 - height
 
 
-def _build_rule_based_insights(branch_df: pd.DataFrame, filial: str) -> str:
-    if branch_df.empty:
+def _build_rule_based_insights(
+    branch_df: pd.DataFrame,
+    filial: str,
+    totals_source_df: pd.DataFrame | None = None,
+) -> str:
+    if branch_df.empty and (totals_source_df is None or totals_source_df.empty):
         return f"Nao encontramos dados operacionais para a filial {filial} no CSV de insights."
 
     lines = [f"Filial {filial}: {len(branch_df)} registros analisados."]
 
-    frete_tables = _build_frete_tables(branch_df)
+    totals_df = totals_source_df if totals_source_df is not None and not totals_source_df.empty else branch_df
+    scoped_df = _build_filial_scope_df(totals_df, filial)
+
+    unidade_emissora_col = _find_column(totals_df, ["Unidade Emissora", "unidade emissora", "unidade emissora ", "unidade"])
+    unidade_receptora_col = _find_column(totals_df, ["Unidade Receptora", "unidade receptora"])
+    valor_frete_final = _compute_valor_frete_final(totals_df)
+
+    expedidos_total = 0.0
+    expedidos_media = 0.0
+    recebidos_total = 0.0
+    recebidos_media = 0.0
+
+    if unidade_emissora_col:
+        expedidos_mask = (
+            totals_df[unidade_emissora_col].astype(str).str.strip().str.casefold()
+            == str(filial).strip().casefold()
+        )
+        expedidos_vals = valor_frete_final[expedidos_mask].dropna()
+        expedidos_total = float(expedidos_vals.sum())
+        expedidos_media = float(expedidos_vals.mean()) if not expedidos_vals.empty else 0.0
+
+    if unidade_receptora_col:
+        recebidos_mask = (
+            totals_df[unidade_receptora_col].astype(str).str.strip().str.casefold()
+            == str(filial).strip().casefold()
+        )
+        recebidos_vals = valor_frete_final[recebidos_mask].dropna()
+        recebidos_total = float(recebidos_vals.sum())
+        recebidos_media = float(recebidos_vals.mean()) if not recebidos_vals.empty else 0.0
+
+    frete_tables = _build_frete_tables(scoped_df)
     if frete_tables:
         lines.append("")
         lines.append(frete_tables)
 
+    unidade_tables = _build_expedidos_recebidos_tables(totals_df, filial)
+    if unidade_tables:
+        lines.append("")
+        lines.append(unidade_tables)
+
+    uf_table = _build_uf_emphasis_table(totals_df, filial)
+    if uf_table:
+        lines.append("")
+        lines.append(uf_table)
+
+    metric_source_df = scoped_df if not scoped_df.empty else branch_df
     numeric_cols = []
-    for col in branch_df.columns:
+    for col in metric_source_df.columns:
         if not _is_metric_column(col):
             continue
-        series = _parse_br_numeric(branch_df[col])
+        series = _parse_br_numeric(metric_source_df[col])
         if series.notna().sum() > 0:
             numeric_cols.append((col, series))
 
@@ -667,12 +1025,16 @@ def _build_rule_based_insights(branch_df: pd.DataFrame, filial: str) -> str:
         selected = preferred[:3] if len(preferred) >= 3 else ranked[:3]
 
         lines.append("Principais metricas do periodo:")
+        lines.append(f"- Valor expedido final (Unidade Emissora): total={expedidos_total:.2f} | media={expedidos_media:.2f}")
+        lines.append(f"- Valor recebido final (Unidade Receptora): total={recebidos_total:.2f} | media={recebidos_media:.2f}")
         for col, series in selected:
             total = float(series.sum(skipna=True))
             media = float(series.mean(skipna=True))
             lines.append(f"- {col}: total={total:.2f} | media={media:.2f}")
     else:
-        lines.append("Nao foi possivel identificar colunas numericas para calculo automatico.")
+        lines.append("Principais metricas do periodo:")
+        lines.append(f"- Valor expedido final (Unidade Emissora): total={expedidos_total:.2f} | media={expedidos_media:.2f}")
+        lines.append(f"- Valor recebido final (Unidade Receptora): total={recebidos_total:.2f} | media={recebidos_media:.2f}")
 
     return "\n".join(lines)
 
@@ -764,12 +1126,12 @@ def _build_insight_text(
         len(branch_df),
     )
 
-    raw_insights = _build_rule_based_insights(branch_df, filial)
+    raw_insights = _build_rule_based_insights(branch_df, filial, totals_source_df=insights_df)
     return _refine_with_ai_if_configured(raw_insights, filial)
 
 
 @app.function_name(name="process_csv")
-@app.schedule(schedule="0 0 18 * * *", arg_name="mytimer", run_on_startup=False)
+@app.schedule(schedule="0 0 12 * * *", arg_name="mytimer", run_on_startup=False)
 def process_csv(mytimer: func.TimerRequest) -> None:
 
     logging.info("Iniciando processamento por destinatario")
@@ -861,8 +1223,12 @@ def process_csv(mytimer: func.TimerRequest) -> None:
             else:
                 branch_df = pd.DataFrame()
 
-            raw_insight_for_pdf = _build_rule_based_insights(branch_df, str(filial))
-            summary_table, detail_table, metric_lines = _extract_frete_tables_for_pdf(raw_insight_for_pdf)
+            raw_insight_for_pdf = _build_rule_based_insights(
+                branch_df,
+                str(filial),
+                totals_source_df=insights_df,
+            )
+            summary_table, detail_table, expedidos_table, recebidos_table, uf_table, metric_lines = _extract_frete_tables_for_pdf(raw_insight_for_pdf)
 
             senha_pdf = cpf[:3]
 
@@ -880,9 +1246,65 @@ def process_csv(mytimer: func.TimerRequest) -> None:
                 c.drawString(100, 750, f"Filial: {filial}")
 
                 y = 700
+
+                total_comment = _build_soft_operational_comment(summary_table, str(filial), "total")
+                if total_comment:
+                    if y <= 140:
+                        c.showPage()
+                        y = 760
+                    y = _draw_wrapped_text(c, total_comment, y, x=50, max_width=520)
+                    y -= 8
+
                 y = _draw_summary_table_example_layout(c, str(filial), summary_table, y)
                 y -= 24
                 y = _draw_table_on_canvas(c, "Detalhe CV/CP/FV/FP", detail_table, y)
+
+                if expedidos_table:
+                    if y <= 180:
+                        c.showPage()
+                        y = 760
+                    y -= 18
+                    exp_comment = _build_soft_operational_comment(expedidos_table, str(filial), "expedidos")
+                    if exp_comment:
+                        y = _draw_wrapped_text(c, exp_comment, y, x=50, max_width=520)
+                        y -= 6
+                    y = _draw_summary_table_example_layout(
+                        c,
+                        str(filial),
+                        expedidos_table,
+                        y,
+                        bloco_titulo="EXPEDIDOS",
+                        secao_titulo="Valores Expedidos (Frete Final)",
+                    )
+
+                if recebidos_table:
+                    if y <= 180:
+                        c.showPage()
+                        y = 760
+                    y -= 18
+                    rec_comment = _build_soft_operational_comment(recebidos_table, str(filial), "recebidos")
+                    if rec_comment:
+                        y = _draw_wrapped_text(c, rec_comment, y, x=50, max_width=520)
+                        y -= 6
+                    y = _draw_summary_table_example_layout(
+                        c,
+                        str(filial),
+                        recebidos_table,
+                        y,
+                        bloco_titulo="RECEBIDOS",
+                        secao_titulo="Valores Recebidos (Frete Final)",
+                    )
+
+                if uf_table:
+                    if y <= 180:
+                        c.showPage()
+                        y = 760
+                    y -= 18
+                    uf_comment = _build_soft_operational_comment(uf_table, str(filial), "fluxos para fora do estado")
+                    if uf_comment:
+                        y = _draw_wrapped_text(c, uf_comment, y, x=50, max_width=520)
+                        y -= 6
+                    y = _draw_table_on_canvas(c, "Valores por UF (Frete Final)", uf_table, y)
 
                 if metric_lines:
                     if y <= 140:
