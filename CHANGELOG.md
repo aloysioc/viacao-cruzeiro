@@ -4,22 +4,11 @@
 
 ### 🚀 Regra de Expedidos x Recebidos (alinhada com cliente)
 
-- **Implementação**: cálculo de `Valor do Frete Final` com regra:
     - se `Tipo de Baixa = LIQUIDADO` → usa `Valor Liquidado`
     - caso contrário → usa `Valor do Frete`
-- **Ajuste**: leitura seletiva de insights passou a incluir `Tipo de Baixa` e `Unidade Receptora`.
-- **Resultado**:
     - total **expedido** por unidade calculado por `Unidade Emissora` usando `Valor do Frete Final`;
     - total **recebido** por unidade calculado por `Unidade Receptora` usando `Valor do Frete Final`.
-- **Impacto no PDF**: os indicadores complementares exibem os dois totais finais por filial (expedido e recebido).
-- **Novo no PDF**: inclusão de tabelas dedicadas de `Valores Expedidos (Frete Final)` e `Valores Recebidos (Frete Final)`, com detalhamento por unidade relacionada e linha `TOTAL`.
-- **Ajuste de layout/regra**: tabelas de expedidos/recebidos foram compactadas para formato consolidado (`TOTAL`, `CIF`, `FOB`) sem detalhamento por unidade, evitando truncamento no PDF e aderindo ao modelo histórico do cliente.
-- **Evolução**: tabelas de expedidos/recebidos passaram a exibir comparação anual com coluna `Desempenho`.
-- **Novo**: inclusão de tabela `Valores por UF (Frete Final)` com `TOTAL` + UFs de maior valor e coluna `Desempenho`.
-- **Correção crítica**: o `TOTAL` da visão principal passou a considerar o escopo completo da filial (`expedidos + recebidos`) no período, e não apenas registros de emissão.
-- **Correção UF**: tabela por UF agora considera fluxos de saída e entrada da filial (quando colunas de UF de destino/origem estiverem disponíveis), refletindo melhor o conceito de "chega ou vai para fora".
-- **Padronização visual**: tabelas de `RECEBIDOS` e `EXPEDIDOS` passaram a usar o mesmo cabeçalho estruturado da tabela `TOTAL` (FILIAL + anos com Quantidade/Valor + DESEMPENHO).
-- **Humanização controlada**: inclusão de comentários operacionais em frase única antes das tabelas (`TOTAL`, `EXPEDIDOS`, `RECEBIDOS` e `UF`), com linguagem suavizada e baseada exclusivamente nos valores calculados.
+- **Nova tabela**: inclusão de `Valores por Cliente Pagador (Frete Final)` em formato mensal (3 últimos meses), filtrada por filial + `CNPJ Pagador` e exibida por `Cliente Pagador`, com métricas `QUANT`, `PESO CALC`, `VALMERC`, `FRETE TOTAL` e `CRES` mês contra mês.
 
 ## [WIP] - 28 de Maio de 2026
 

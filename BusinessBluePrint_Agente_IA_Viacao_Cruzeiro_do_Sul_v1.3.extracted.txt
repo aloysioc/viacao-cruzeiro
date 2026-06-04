@@ -1,0 +1,368 @@
+Business Blueprint (Negócio & Funcional)Mapeamento de Requisitos e Comportamentos do Sistema Autosserviço via Aplicativos
+Departamento: Gente Gestão e Reputação
+Autor: Aloysio Coutinho
+Data: 19/05/2026
+Versão: 1.3
+Sumário
+Blueprint – Agente de Inteligência Comercial3
+Informações Gerais3
+Sumário Executivo3
+Direcionamento proposto3
+Resultados esperados3
+Métricas de acompanhamento4
+Fonte de Dados4
+Desafios do projeto e situação atual (AS-IS)4
+Principais limitações4
+Impactos observados4
+Modelo atual4
+Fluxo típico do sistema5
+Principais desafios operacionais5
+Casos de Uso5
+Requisitos Funcionais5
+Requisitos Não Funcionais6
+Impactos da operação6
+Objetivos do projeto (TO-BE)6
+Objetivo geral6
+Solução proposta6
+Implementação de um agente de IA que:7
+Segurança da Informação7
+Estrutura do modelo proposto7
+Resultados de negócios esperados7
+Frequência8
+Stakeholders8
+MVP8
+Premissas8
+Restrições8
+Evoluções Futuras8
+Requisitos de Negócio – AI Agent Comercial8
+REQ01 — Geração Automatizada de Insights Comerciais9
+REQ02 — Distribuição de Insights10
+REQ03 — Integração com BI11
+REQ04 — Monitoramento e Logging11
+REQ05 — Governança e Segurança12
+Arquitetura Técnica – AI Agent Comercial13
+Visão Geral13
+Detalhamento Técnico13
+Fluxo14
+Blueprint – Agente de Inteligência Comercial
+Informações Gerais
+Cliente: Viação Cruzeiro do Sul
+Objetivo: Automatização da geração e distribuição de insights comerciais por filial
+Sumário Executivo
+A Viação Cruzeiro do Sul possui um processo de análise comercial baseado em dados extraídos de seu sistema legado (TMS), atualmente operacionalizado por meio de geração manual de relatórios e envio de insights para as filiais.Com o crescimento da operação, esse modelo tornou-se limitado em escala, gerando dependência de atividades manuais e reduzindo a velocidade de disseminação de informações.O projeto propõe a implementação de um agente de inteligência baseado em IA capaz de processar automaticamente dados em formato CSV, interpretar indicadores e distribuir insights estruturados para as filiais via e-mail.A solução visa aumentar a eficiência operacional, padronizar a comunicação e ampliar a capacidade analítica sem alterar o sistema de origem.
+Direcionamento proposto
+Implementar um agente de inteligência comercial capaz de:
+Consumir dados existentes do BI
+Interpretar automaticamente indicadores de desempenho
+Gerar análises em linguagem natural
+Identificar oportunidades e riscos
+Distribuir insights de forma automatizada para as filiais
+Resultados esperados
+Escalabilidade da análise para 100% das filiais
+Redução do esforço manual operacional
+Padronização da comunicação comercial
+Aumento da capacidade de reação das unidades
+Melhor aproveitamento dos dados existentes
+Métricas de acompanhamento
+Tempo médio de geração de insights
+Volume de filiais atendidas automaticamente
+Taxa de leitura/interação dos insights enviados
+Evolução de faturamento por filial
+Quantidade de clientes reativados
+Fonte de Dados
+A origem dos dados será baseada em arquivos CSV gerados a partir do sistema legado TMS por meio de um script Python executado três vezes ao dia. Esses arquivos serão armazenados em um repositório centralizado e servirão como ponto de ingestão da solução.
+Desafios do projeto e situação atual (AS-IS)
+O processo atual depende da análise manual dos dados gerados via CSV, exigindo interpretação humana e envio manual de insights. Esse modelo não escala adequadamente e reduz a eficiência da atuação comercial.
+Principais limitações
+Dependência de exportação manual de dados
+Baixa automação do processo analítico
+Falta de padronização na geração de insights
+Capacidade limitada de cobertura da operação
+Impactos observados
+Oportunidades comerciais não exploradas
+Falta de visibilidade local do desempenho
+Tomada de decisão reativa
+Subutilização do BI existente
+Modelo atual
+O modelo atual consiste na geração de arquivos CSV a partir do sistema TMS, seguidos de análise manual e envio individualizado de insights por e-mail.
+Consumo dos dados via arquivos CSV
+Análise manual por colaborador
+Interpretação dos indicadores
+Escrita manual de insights
+Envio por e-mail individualizado
+Fluxo típico do sistema
+Extração dos dados do BI
+Análise manual por filial
+Comparação entre períodos
+Identificação de variações
+Redação de insights
+Envio por e-mail
+Principais desafios operacionais
+Alto volume de unidades
+Heterogeneidade dos parceiros
+Baixa maturidade analítica em campo
+Dependência de recurso humano especializado
+Casos de Uso
+UC-01: Análise automática de desempenho por filial
+UC-02: Interpretação automática dos dados
+UC-03: Identificação de pontos críticos
+UC-04: Análise de clientes
+UC-05: Comunicação automatizada
+Requisitos Funcionais
+RF-01: Consumir dados estruturados dos arquivos CSV
+RF-02: Gerar comparações entre períodos
+RF-03: Calcular indicadores de desempenho:
+o   Crescimento percentual
+o   Volume expedido/recebido
+o   Performance por categoria
+RF-04: Gerar textos descritivos automaticamente baseados nos dados
+RF-05: Deve identificar e destacar:
+o   Crescimentos relevante
+o   Quedas relevantes
+o   Outliers (anomalias)
+RF-06: Gerar insights por filial de forma independente
+RF-07: Envio automático por e-mail
+Requisitos Não Funcionais
+Escalabilidade
+Performance adequada
+Fidelidade aos dados do BI
+Clareza para usuários não técnicos
+Segurança
+Impactos da operação
+Lentidão na disseminação de informações
+Baixa efetividade das ações comerciais
+Perda de oportunidades de receita
+Desalinhamento entre matriz e filiais
+Objetivos do projeto (TO-BE)
+O projeto tem como objetivo transformar o processo atual em um modelo automatizado e escalável, no qual a geração de insights comerciais seja realizada de forma contínua e padronizada. A proposta busca ampliar a cobertura analítica para todas as filiais, reduzir a dependência de atividades manuais e melhorar a capacidade de interpretação e tomada de decisão nas unidades operacionais.
+Objetivo geral
+Transformar o processo manual de análise comercial em um modelo automatizado, inteligente e escalável, capaz de apoiar a tomada de decisão nas filiais.
+Automatizar geração de insights comerciais
+Escalar comunicação para todas as filiais
+Reduzir dependência de processos manuais
+Melhorar interpretação dos dados
+Solução proposta
+A solução utilizará os arquivos CSV como entrada, realizando processamento automatizado, geração de insights com IA e envio por e-mail. O modelo inicial não prevê interação com o usuário, apenas distribuição automatizada.
+Implementação de um agente de IA que:
+Analisa dados estruturados dos CSVs
+Gera insights automaticamente
+Destaca riscos e oportunidades
+Expõe resultados de forma clara
+Distribui insights relacionados via e-mail (canais digitais possibilidades futuras)
+Segurança da Informação
+Os relatórios poderão ser protegidos em formato PDF, com acesso condicionado à validação de informações parciais do usuário, como os três primeiros dígitos do CPF.
+Estas informações estarão contidas em um arquivo (formato a definir) onde as informações “e-mail, filial e CPF” estarão cadastradas.
+Os dois primeiros campos definirão quais dados serão enviados para quais destinatários e o terceiro trará a permissão para que o destinatário possa ler o arquivo enviado.
+Estrutura do modelo proposto
+Camada de dados: CSV / Data Lake
+Dados de faturamento por filial
+Dados CIF/FOB
+Dados por região
+Dados por cliente
+Histórico comparativo
+Camada de processamento: consolidação e preparação
+Camada de inteligência: IA (interpretação e geração de insights)
+Camada de entrega: e-mail (MVP) e canais digitais
+Resultados de negócios esperados
+Aumento de faturamento por melhor atuação comercial
+Redução de churn de clientes
+Melhoria na eficiência operacional
+Aumento do engajamento das filiais
+Maior retorno sobre investimento em BI
+E-mail com análise automatizada
+Resumo de desempenho
+Pontos de atenção
+Destaques positivos
+Lista de clientes críticos
+Frequência
+Mensal (inicial)
+Semanal ou diário (futuro)
+Stakeholders
+Diretoria Comercial
+Equipe Comercial
+Parceiros/Agências
+TI/Dados
+MVP
+5 a 10 filiais
+Comparação mensal
+Envio por e-mail
+Premissas
+Dados confiáveis no BI
+Estrutura mínima existente
+Uso de e-mail pelos parceiros
+Restrições
+Dependência da qualidade dos dados
+Dependência de exportação inicial
+Sem tempo real no MVP
+Evoluções Futuras
+Envio via WhatsApp
+Agente conversacional
+Integração com sistemas
+Recomendações automáticas
+Requisitos de Negócio – AI Agent Comercial
+Os requisitos de negócio da Viação Cruzeiro do Sul estão relacionados à necessidade de escalar e padronizar a análise de desempenho comercial, garantindo que todas as filiais tenham acesso a insights claros, acionáveis e no tempo adequado para tomada de decisão.
+REQ01 — Geração Automatizada de Insights Comerciais
+1. Descrição de Negócio e Funcional
+A solução deve permitir a geração de insights para todas as filiais da operação, independentemente do volume ou distribuição geográfica, eliminando a limitação atual do processo manual.
+A empresa necessita automatizar a análise dos dados comerciais, reduzindo a dependência de intervenção humana e aumentando a eficiência operacional.
+Objetivos:
+- Automatizar interpretação de dados
+- Escalar análise
+- Padronizar comunicação
+- Reduzir trabalho manual
+- Melhorar tomada de decisão
+2. Comportamento Funcional
+Fluxo Geral:
+1. BI fornece dados
+2. Dados são ingeridos
+3. Dados organizados por filial
+4. Cálculos executados
+5. IA gera insights
+6. Resultado preparado
+3. Etapas de Processamento
+- Ingestão e validação
+- Consolidação por filial
+- Cálculo de indicadores
+- Análise de clientes
+- Geração de texto
+Tratamento de Exceções:
+- Dados inválidos → log
+- Dados ausentes → alerta
+- Falha IA → reprocessamento
+4. Critérios de Aceite
+- Insights gerados
+- Coerência com dados
+- Execução dentro do SLA
+5. Regras de Negócio
+- RN01: Insight vinculado à filial
+- RN02: Uso de dados oficiais do BI
+- RN03: Comparações com períodos equivalentes
+6. Premissas
+- Dados disponíveis
+- Filiais identificadas
+- Histórico existente
+REQ02 — Distribuição de Insights
+1. Descrição de Negócio e Funcional
+Define o envio automatizado dos insights para as filiais.Os insights gerados devem seguir um padrão único de linguagem e estrutura, garantindo consistência na comunicação entre matriz e filiais.
+Objetivos:
+- Automatizar envio
+- Garantir entrega
+- Aumentar engajamento
+2. Comportamento Funcional
+Fluxo Geral:
+1. Insights gerados
+2. Sistema formata
+3. Envia e-mail
+4. Registra status
+3. Etapas de Processamento
+- Formatação
+- Mapeamento de destinatários
+- Envio
+- Registro em log
+Tratamento de Exceções:
+- Falha no envio → reprocessamento
+- Destinatário inválido → log
+4. Critérios de Aceite
+- Entrega realizada
+- Logs disponíveis
+5. Regras de Negócio
+- RN01: Destinatário válido
+- RN02: Entrega deve ser rastreável
+6. Premissas
+- E-mails cadastrados
+- Infraestrutura disponível
+REQ03 — Integração com BI
+1. Descrição de Negócio e Funcional
+Define a integração com o BI para ingestão confiável de dados.A solução deve utilizar os dados já disponíveis no ambiente de BI, sem necessidade de reconstrução completa da base de dados.
+Objetivos:
+- Consumir dados
+- Garantir integridade
+2. Comportamento Funcional
+Fluxo Geral:
+1. BI exporta
+2. Sistema consome
+3. Valida
+4. Armazena
+3. Etapas de Processamento
+- Extração
+- Validação
+- Transformação
+- Armazenamento
+Tratamento de Exceções:
+- Falha de conexão → reprocessamento
+- Dados corrompidos → rejeição
+4. Critérios de Aceite
+- Dados ingeridos
+- Integridade mantida
+5. Regras de Negócio
+- RN01: Apenas dados validados
+- RN02: Fonte oficial obrigatória
+6. Premissas
+- BI acessível
+- Formato consistente
+REQ04 — Monitoramento e Logging
+1. Descrição de Negócio e Funcional
+Define monitoramento e rastreabilidade da solução.
+Objetivos:
+- Garantir rastreabilidade
+- Monitorar execução
+2. Comportamento Funcional
+Fluxo Geral:
+1. Execução inicia
+2. Logs capturados
+3. Alertas gerados
+3. Etapas de Processamento
+- Geração de logs
+- Coleta de métricas
+- Configuração de alertas
+Tratamento de Exceções:
+- Falha no sistema → alerta
+4. Critérios de Aceite
+- Logs completos
+- Alertas funcionais
+5. Regras de Negócio
+- RN01: Logs obrigatórios
+- RN02: Alertas configurados
+6. Premissas
+- Infraestrutura de monitoramento ativa
+REQ05 — Governança e Segurança
+1. Descrição de Negócio e Funcional
+Define controle de acesso e proteção de dados.
+Objetivos:
+- Proteger dados
+- Controlar acesso
+2. Comportamento Funcional
+Fluxo Geral:
+1. Usuário recebe e-mail
+2. Usuário tenta abrir PDF anexado
+2. Sistema valida
+3. Acesso concedido ou negado
+3. Etapas de Processamento
+- Recebimento
+- Autorização
+- Controle de acesso
+Tratamento de Exceções:
+- Acesso indevido → negado
+4. Critérios de Aceite
+- Acesso controlado
+- Logs de auditoria
+5. Regras de Negócio
+- RN01: Autenticação obrigatória cadastrada
+- RN02: Controle por perfil
+6. Premissas
+- Usuários cadastrados
+- Políticas definidas
+Arquitetura Técnica – AI Agent Comercial
+Visão Geral
+Fluxo: CSVs (TMS) → Azure Storage → Azure Functions → Azure OpenAI → Entrega (Email/WhatsApp)
+Detalhamento Técnico
+Azure Storage: armazenamento dos dados brutos e históricos.
+Azure Functions: processamento, cálculos e preparação dos dados.
+Azure OpenAI: geração de insights em linguagem natural.
+Integração: envio via SMTP ou APIs externas.
+Fluxo
+1. Extração de dados do BI.
+2. Armazenamento no Azure.
+3. Processamento.
+4. Geração de insights.
+5. Envio automático.

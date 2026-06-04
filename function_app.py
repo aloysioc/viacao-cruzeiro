@@ -7,6 +7,7 @@ import json
 import urllib.request
 import urllib.error
 import unicodedata
+import re
 
 from azure.identity import DefaultAzureCredential
 from azure.storage.filedatalake import DataLakeServiceClient
@@ -14,9 +15,10 @@ from azure.storage.filedatalake import DataLakeServiceClient
 from io import BytesIO
 import pandas as pd
 
-from reportlab.lib.pagesizes import letter
+from reportlab.lib.pagesizes import letter, landscape
 from reportlab.lib import colors
 from reportlab.pdfgen import canvas
+from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.platypus import Table, TableStyle
 import tempfile
 
@@ -33,6 +35,14 @@ ACS_EMAIL_MAX_ATTEMPTS = int(os.getenv("ACS_EMAIL_MAX_ATTEMPTS", "3"))
 RECIPIENTS_CSV_PATH = os.getenv("RECIPIENTS_CSV_PATH", "csv/destinatarios.csv")
 INSIGHTS_SOURCE_FOLDER = os.getenv("INSIGHTS_SOURCE_FOLDER", "csv/fonte")
 INSIGHTS_SOURCE_FILENAME = os.getenv("INSIGHTS_SOURCE_FILENAME", "").strip()
+REFERENCE_FILE_SYSTEM = os.getenv("REFERENCE_FILE_SYSTEM", "reference")
+FILIAIS_REFERENCE_PATH = os.getenv("FILIAIS_REFERENCE_PATH", "Filiais.TXT")
+CLIENTES_TABLE_LANDSCAPE = str(os.getenv("CLIENTES_TABLE_LANDSCAPE", "1")).strip().casefold() in {
+    "1", "true", "yes", "sim", "on"
+}
+AFASTADOS_TABLE_LANDSCAPE = str(os.getenv("AFASTADOS_TABLE_LANDSCAPE", "1")).strip().casefold() in {
+    "1", "true", "yes", "sim", "on"
+}
 
 _INSIGHTS_REQUIRED_COLUMNS = [
     "Unidade Emissora", "unidade emissora", "unidade emissora ", "unidade",
@@ -40,10 +50,47 @@ _INSIGHTS_REQUIRED_COLUMNS = [
     "UF Destinatario", "UF do Destinatario", "UF destino", "UF de destino",
     "UF Remetente", "UF do Remetente", "UF Origem", "UF de origem",
     "UF Receptora", "UF da Unidade Receptora", "UF Recebedora",
+    "CNPJ Pagador", "cnpj pagador", "CNPJ do Pagador", "cnpj do pagador",
+    "Endereco do Pagador", "endereco do pagador", "Endereco Pagador", "endereco pagador",
+    "CEP do Pagador", "cep do pagador", "Cidade do Pagador", "cidade do pagador",
+    "UF do Pagador", "uf do pagador", "IE do Pagador", "ie do pagador",
+    "CNPJ/CPF", "cnpj cpf", "CNPJ", "cnpj", "CPF", "cpf",
+    "Cliente", "cliente", "Nome do Cliente", "nome do cliente",
+    "Cliente Pagador", "cliente pagador", "Nome do Cliente Pagador", "nome do cliente pagador",
+    "Endereco", "endereco", "Logradouro", "logradouro", "Endereco do Cliente", "endereco do cliente",
+    "CEP", "cep", "CEP do Remetente", "cep do remetente",
+    "Fone", "fone", "Telefone", "telefone", "Celular", "celular",
+    "Fone do Pagador", "fone do pagador", "Telefone do Pagador", "telefone do pagador",
+    "Cidade", "cidade", "Cidade do Destinatario", "cidade do destinatario", "Municipio", "municipio",
+    "UF", "uf", "Estado", "estado",
+    "IE", "ie", "Inscricao Estadual", "inscricao estadual", "Inscricao", "inscricao",
+    "IE cliente remetente", "ie cliente remetente",
+    "Peso Calc", "peso calc", "Peso Calculado", "peso calculado",
+    "ValMerc", "valmerc", "Valor Mercadoria", "valor mercadoria",
+    "Quantidade", "quantidade", "Qtd", "qtd", "Quant", "quant",
     "Cidade do Remetente", "cidade do remetente",
+    "Login", "login",
+    "Login do Usuario", "login do usuario",
+    "Login do Vendedor", "login do vendedor",
+    "Vendedor", "vendedor",
+    "Nome do Vendedor", "nome do vendedor",
     "Tipo do Frete", "tipo do frete",
     "Tipo de Baixa", "tipo de baixa",
     "Data de Emissao", "data de emissao",
+    "Data da Ultima Ocorrencia", "data da ultima ocorrencia",
+    "Codigo da Ultima Ocorrencia", "codigo da ultima ocorrencia",
+    "Usuario da Ultima Ocorrencia", "usuario da ultima ocorrencia",
+    "Unidade da Ultima Ocorrencia", "unidade da ultima ocorrencia",
+    "Descricao da Ultima Ocorrencia", "descricao da ultima ocorrencia",
+    "Latitude da Ultima Ocorrencia", "latitude da ultima ocorrencia",
+    "Longitude da Ultima Ocorrencia", "longitude da ultima ocorrencia",
+    "Dias (Data da Ultima Ocorrencia)", "dias data da ultima ocorrencia",
+    "Data do Ultimo Movimento", "data do ultimo movimento",
+    "Data da Ultima Movimentacao", "data da ultima movimentacao",
+    "Data da Ultima Interacao", "data da ultima interacao",
+    "Data da Ultima Compra", "data da ultima compra",
+    "Data da Ultima Venda", "data da ultima venda",
+    "Data de Inclusao da Ultima Ocorrencia", "data de inclusao da ultima ocorrencia",
     "Valor do Frete", "valor do frete",
     "Valor Liquidado", "valor liquidado",
     "Tipo de Movimentacao", "tipo de movimentacao", "tipo movimentacao",
@@ -51,6 +98,164 @@ _INSIGHTS_REQUIRED_COLUMNS = [
     "Recebido/Expedido", "recebido expedido",
     "Status Operacao", "status operacao",
 ]
+
+
+def _parse_filiais_mapping_from_text(content: str) -> dict[str, str]:
+    mapping: dict[str, str] = {}
+
+    fixed_width_mapping = _parse_filiais_fixed_width_report(content)
+    if fixed_width_mapping:
+        return fixed_width_mapping
+
+    for raw_line in content.splitlines():
+        line = str(raw_line).strip()
+        if not line:
+            continue
+        if line.startswith(("#", "//", ";")):
+            continue
+
+        normalized_line = _normalize_header_name(line)
+        if "sigla" in normalized_line and "cidade" in normalized_line:
+            continue
+
+        sigla = None
+        cidade = None
+
+        for sep in ["=", ";", "\t", "|", ","]:
+            if sep in line:
+                parts = [p.strip() for p in line.split(sep) if p.strip()]
+                if len(parts) >= 2:
+                    sigla, cidade = parts[0], parts[1]
+                    break
+
+        if not sigla or not cidade:
+            match = re.match(r"^\s*([A-Za-z0-9]{2,10})\s+(.+?)\s*$", line)
+            if match:
+                sigla = match.group(1)
+                cidade = match.group(2)
+
+        if not sigla or not cidade:
+            continue
+
+        key = str(sigla).strip().casefold()
+        value = str(cidade).strip()
+        if key and value:
+            mapping[key] = value
+
+    return mapping
+
+
+def _parse_filiais_fixed_width_report(content: str) -> dict[str, str]:
+    lines = content.splitlines()
+    separator_line = None
+    header_line = None
+
+    for idx, line in enumerate(lines):
+        if "+" in line and "---" in line:
+            next_idx = idx + 1
+            if next_idx < len(lines) and "SIG" in lines[next_idx].upper() and "CIDADE" in lines[next_idx].upper():
+                separator_line = line.rstrip("\n")
+                header_line = lines[next_idx].rstrip("\n")
+                break
+
+    if not separator_line or not header_line:
+        return {}
+
+    widths = [len(part) for part in separator_line.split("+")]
+    starts = []
+    current = 0
+    for width in widths:
+        starts.append((current, current + width))
+        current += width + 1
+
+    headers = [header_line[start:end].strip() for start, end in starts]
+    normalized_headers = [_normalize_header_name(h) for h in headers]
+
+    sig_idx = None
+    cidade_idx = None
+    for idx, name in enumerate(normalized_headers):
+        if name.startswith("sig"):
+            sig_idx = idx
+        if "cidade" == name or name.startswith("cidade"):
+            cidade_idx = idx
+
+    if sig_idx is None or cidade_idx is None:
+        return {}
+
+    mapping: dict[str, str] = {}
+    data_started = False
+    for line in lines:
+        raw = line.rstrip("\n")
+        if not raw.strip():
+            continue
+        if raw == header_line or raw == separator_line:
+            data_started = True
+            continue
+        if not data_started:
+            continue
+        if "RELACAO DE UNIDADES" in raw.upper() or raw.strip().startswith("PAG:"):
+            continue
+        if "+" in raw and "---" in raw:
+            continue
+
+        row = [raw[start:end].strip() for start, end in starts]
+        if len(row) <= max(sig_idx, cidade_idx):
+            continue
+
+        sigla = row[sig_idx].strip().split()[0] if row[sig_idx].strip() else ""
+        cidade = row[cidade_idx].strip()
+        if not sigla or not cidade:
+            continue
+
+        cidade = re.sub(r"-[A-Z]{2}$", "", cidade).strip()
+        if sigla.casefold() == "sig":
+            continue
+
+        mapping[sigla.casefold()] = cidade
+
+    return mapping
+
+
+def _load_filiais_mapping(service_client: DataLakeServiceClient) -> dict[str, str]:
+    try:
+        reference_fs = service_client.get_file_system_client(REFERENCE_FILE_SYSTEM)
+        file_client = reference_fs.get_file_client(FILIAIS_REFERENCE_PATH)
+        content_bytes = file_client.download_file().readall()
+
+        decoded = None
+        for encoding in ["utf-8", "latin-1", "iso-8859-1", "cp1252", "windows-1252"]:
+            try:
+                decoded = content_bytes.decode(encoding)
+                break
+            except UnicodeDecodeError:
+                continue
+
+        if decoded is None:
+            decoded = content_bytes.decode("utf-8", errors="ignore")
+
+        mapping = _parse_filiais_mapping_from_text(decoded)
+        if mapping:
+            logging.info(
+                "Mapa de filiais carregado de %s/%s com %s entradas.",
+                REFERENCE_FILE_SYSTEM,
+                FILIAIS_REFERENCE_PATH,
+                len(mapping),
+            )
+        else:
+            logging.warning(
+                "Arquivo %s/%s lido, mas sem mapeamentos validos de sigla->cidade.",
+                REFERENCE_FILE_SYSTEM,
+                FILIAIS_REFERENCE_PATH,
+            )
+        return mapping
+    except Exception as exc:
+        logging.warning(
+            "Nao foi possivel carregar mapa de filiais em %s/%s: %s",
+            REFERENCE_FILE_SYSTEM,
+            FILIAIS_REFERENCE_PATH,
+            exc,
+        )
+        return {}
 
 
 def _read_csv_from_datalake(
@@ -171,17 +376,31 @@ def _load_insights_from_datalake(
                 continue
 
             if allowed_units:
-                unidade_col = _find_column(
+                unidade_emissora_col = _find_column(
                     source_df,
                     ["Unidade Emissora", "unidade emissora", "unidade emissora ", "unidade"],
                 )
-                if unidade_col:
+                unidade_receptora_col = _find_column(
+                    source_df,
+                    ["Unidade Receptora", "unidade receptora"],
+                )
+
+                if unidade_emissora_col or unidade_receptora_col:
                     before_count = len(source_df)
-                    source_df = source_df[
-                        source_df[unidade_col].astype(str).str.strip().str.casefold().isin(allowed_units)
-                    ].copy()
+                    emissora_mask = (
+                        source_df[unidade_emissora_col].astype(str).str.strip().str.casefold().isin(allowed_units)
+                        if unidade_emissora_col
+                        else pd.Series(False, index=source_df.index)
+                    )
+                    receptora_mask = (
+                        source_df[unidade_receptora_col].astype(str).str.strip().str.casefold().isin(allowed_units)
+                        if unidade_receptora_col
+                        else pd.Series(False, index=source_df.index)
+                    )
+
+                    source_df = source_df[emissora_mask | receptora_mask].copy()
                     logging.info(
-                        "Filtro por unidades em %s: %s -> %s linhas.",
+                        "Filtro por unidades (emissora/receptora) em %s: %s -> %s linhas.",
                         source_path,
                         before_count,
                         len(source_df),
@@ -293,10 +512,45 @@ def _parse_percent_to_float(value: str) -> float:
         return 0.0
 
 
+def _is_negative_display_value(value: str) -> bool:
+    text = str(value).strip()
+    if not text or text == "-":
+        return False
+
+    # Percentual (ex.: -9%)
+    if text.endswith("%"):
+        try:
+            return float(text.replace("%", "").replace(",", ".")) < 0
+        except ValueError:
+            return False
+
+    # Monetario BR (ex.: R$ -1.234,56)
+    if "R$" in text:
+        try:
+            numeric = text.replace("R$", "").strip().replace(".", "").replace(",", ".")
+            return float(numeric) < 0
+        except ValueError:
+            return False
+
+    # Numerico generico (ex.: -123,45)
+    try:
+        return float(text.replace(".", "").replace(",", ".")) < 0
+    except ValueError:
+        return False
+
+
+def _is_growth_header(value: str) -> bool:
+    header = _normalize_header_name(str(value))
+    return "cres" in header or "desempenho" in header
+
+
 def _safe_growth_percent(old_value: float, new_value: float) -> str:
     if old_value == 0:
         return "-"
-    return f"{((new_value / old_value) - 1) * 100:.0f}%"
+    pct = round(((new_value / old_value) - 1) * 100)
+    if pct == 0:
+        return "0%"
+    return f"{pct:.0f}%"
 
 
 def _build_soft_operational_comment(
@@ -320,7 +574,71 @@ def _build_soft_operational_comment(
         return ""
 
     growth = _parse_percent_to_float(desempenho)
-    bloco_txt = bloco_nome.lower()
+    bloco_txt = bloco_nome.lower().strip()
+
+    if bloco_txt == "total":
+        if growth > 0:
+            return (
+                f"No consolidado total, a filial {filial.upper()} apresentou crescimento de {desempenho}, "
+                f"com evolucao de {valor_ano1} para {valor_ano2}, mantendo resultado positivo no periodo."
+            )
+        if growth < 0:
+            return (
+                f"No consolidado total, a filial {filial.upper()} registrou leve reducao de {abs(growth):.0f}%, "
+                f"com variacao de {valor_ano1} para {valor_ano2}, mantendo acompanhamento proximo da operacao."
+            )
+        return (
+            f"No consolidado total, a filial {filial.upper()} manteve estabilidade no periodo, "
+            f"com resultado de {valor_ano1} para {valor_ano2}."
+        )
+
+    if bloco_txt == "expedidos":
+        if growth > 0:
+            return (
+                f"Nos fretes expedidos, a filial {filial.upper()} apresentou crescimento de {desempenho}, "
+                f"evoluindo de {valor_ano1} para {valor_ano2} no periodo analisado."
+            )
+        if growth < 0:
+            return (
+                f"Nos fretes expedidos, a filial {filial.upper()} teve uma acomodacao de {abs(growth):.0f}%, "
+                f"com ajuste de {valor_ano1} para {valor_ano2}, em um comportamento pontual do periodo."
+            )
+        return (
+            f"Nos fretes expedidos, a filial {filial.upper()} manteve estabilidade no periodo, "
+            f"com resultado de {valor_ano1} para {valor_ano2}."
+        )
+
+    if bloco_txt == "recebidos":
+        if growth > 0:
+            return (
+                f"Nos fretes recebidos, a filial {filial.upper()} apresentou crescimento de {desempenho}, "
+                f"com variacao de {valor_ano1} para {valor_ano2} no periodo analisado."
+            )
+        if growth < 0:
+            return (
+                f"Nos fretes recebidos, a filial {filial.upper()} registrou leve reducao de {abs(growth):.0f}%, "
+                f"com variacao de {valor_ano1} para {valor_ano2}, mantendo o resultado geral sob controle."
+            )
+        return (
+            f"Nos fretes recebidos, a filial {filial.upper()} manteve estabilidade no periodo, "
+            f"com resultado de {valor_ano1} para {valor_ano2}."
+        )
+
+    if "fora do estado" in bloco_txt:
+        if growth > 0:
+            return (
+                f"Nos fretes que chegam ou vao para fora do estado, a filial {filial.upper()} teve desempenho positivo de {desempenho}, "
+                f"com evolucao de {valor_ano1} para {valor_ano2} no periodo analisado."
+            )
+        if growth < 0:
+            return (
+                f"Nos fretes que chegam ou vao para fora do estado, houve leve reducao de {abs(growth):.0f}% para a filial {filial.upper()}, "
+                f"com variacao de {valor_ano1} para {valor_ano2}, mantendo resultado geral positivo no periodo."
+            )
+        return (
+            f"Nos fretes que chegam ou vao para fora do estado, a filial {filial.upper()} manteve estabilidade no periodo, "
+            f"com resultado de {valor_ano1} para {valor_ano2}."
+        )
 
     if growth > 0:
         return (
@@ -329,13 +647,125 @@ def _build_soft_operational_comment(
         )
     if growth < 0:
         return (
-            f"No consolidado de {bloco_txt}, a filial {filial.upper()} registrou uma acomodacao de {abs(growth):.0f}%, "
-            f"com variacao de {valor_ano1} para {valor_ano2}, indicando oportunidade de acompanhamento operacional."
+            f"No consolidado de {bloco_txt}, a filial {filial.upper()} registrou leve reducao de {abs(growth):.0f}%, "
+            f"com variacao de {valor_ano1} para {valor_ano2}, mantendo acompanhamento operacional."
         )
     return (
         f"No consolidado de {bloco_txt}, a filial {filial.upper()} manteve estabilidade no periodo, "
         f"com resultado de {valor_ano1} para {valor_ano2}."
     )
+
+
+def _build_ai_operational_comment_if_configured(
+    table_data: list[list[str]],
+    filial: str,
+    bloco_nome: str,
+) -> str | None:
+    endpoint = os.getenv("AOAI_ENDPOINT")
+    deployment = os.getenv("AOAI_DEPLOYMENT")
+    api_key = os.getenv("AOAI_API_KEY")
+    api_version = os.getenv("AOAI_API_VERSION", "2024-10-21")
+
+    if not endpoint or not deployment or not api_key:
+        return None
+
+    if len(table_data) < 2:
+        return None
+
+    facts = {
+        "filial": filial.upper(),
+        "bloco": bloco_nome,
+        "cabecalho": table_data[0],
+        "linha_total": table_data[1],
+        "linhas_destaque": table_data[2:5],
+    }
+
+    base_endpoint = endpoint.rstrip("/")
+    url = (
+        f"{base_endpoint}/openai/deployments/{deployment}/chat/completions"
+        f"?api-version={api_version}"
+    )
+
+    payload = {
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "Voce escreve comunicados operacionais em portugues para colaboradores. "
+                    "Regras obrigatorias: produzir uma unica frase, linguagem simples e suave, "
+                    "sem tom alarmista, sem inventar dados, usar apenas os fatos fornecidos."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    "Com base nos fatos abaixo, escreva uma frase unica no estilo de relatorio operacional. "
+                    "A frase deve destacar crescimento, estabilidade ou reducao de forma suave. "
+                    "Nao use listas, nao use markdown, nao acrescente numeros que nao estejam nos fatos.\n\n"
+                    f"Fatos (JSON):\n{json.dumps(facts, ensure_ascii=False)}"
+                ),
+            },
+        ],
+        "max_tokens": 120,
+        "temperature": 0.2,
+    }
+
+    request = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "api-key": api_key,
+        },
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            data = json.loads(response.read().decode("utf-8"))
+            choices = data.get("choices") or []
+            if not choices:
+                return None
+
+            content = choices[0].get("message", {}).get("content", "").strip()
+            if not content:
+                return None
+
+            # Garante uma frase unica no PDF.
+            one_line = " ".join(content.replace("\n", " ").split())
+            if not one_line.endswith((".", "!", "?")):
+                one_line += "."
+            return one_line
+    except Exception as exc:
+        logging.warning(
+            "Falha ao gerar comentario dinamico via IA para %s/%s: %s",
+            filial,
+            bloco_nome,
+            exc,
+        )
+        return None
+
+
+def _build_operational_comment(
+    table_data: list[list[str]],
+    filial: str,
+    bloco_nome: str,
+) -> str:
+    ai_comment = _build_ai_operational_comment_if_configured(table_data, filial, bloco_nome)
+    if ai_comment:
+        logging.info(
+            "Comentario operacional gerado por IA | filial=%s | bloco=%s",
+            filial,
+            bloco_nome,
+        )
+        return ai_comment
+
+    logging.info(
+        "Comentario operacional gerado por fallback deterministico | filial=%s | bloco=%s",
+        filial,
+        bloco_nome,
+    )
+    return _build_soft_operational_comment(table_data, filial, bloco_nome)
 
 
 def _draw_wrapped_text(
@@ -502,6 +932,31 @@ def _extract_ano_series(df: pd.DataFrame, date_col: str) -> pd.Series:
     if parsed_dates.isna().all():
         parsed_dates = pd.to_datetime(df[date_col], format="%d/%m/%Y", errors="coerce")
     return parsed_dates.dt.year
+
+
+def _extract_datetime_series(df: pd.DataFrame, date_col: str) -> pd.Series:
+    parsed_dates = pd.to_datetime(df[date_col], format="%d/%m/%y", errors="coerce")
+    if parsed_dates.isna().all():
+        parsed_dates = pd.to_datetime(df[date_col], format="%d/%m/%Y", errors="coerce")
+    return parsed_dates
+
+
+def _month_name_pt(month: int) -> str:
+    names = {
+        1: "JANEIRO",
+        2: "FEVEREIRO",
+        3: "MARCO",
+        4: "ABRIL",
+        5: "MAIO",
+        6: "JUNHO",
+        7: "JULHO",
+        8: "AGOSTO",
+        9: "SETEMBRO",
+        10: "OUTUBRO",
+        11: "NOVEMBRO",
+        12: "DEZEMBRO",
+    }
+    return names.get(int(month), str(month))
 
 
 def _build_frete_tables(branch_df: pd.DataFrame) -> str:
@@ -767,14 +1222,486 @@ def _build_uf_emphasis_table(
     return "\n".join(lines)
 
 
+def _build_cliente_pagador_table(
+    totals_df: pd.DataFrame,
+    filial: str,
+    target_year: int | None = None,
+) -> str:
+    if totals_df.empty:
+        return ""
+
+    scoped_df = _build_filial_scope_df(totals_df, filial)
+    if scoped_df.empty:
+        return ""
+
+    date_col = _find_column(scoped_df, ["Data de Emissao", "data de emissao"])
+    cnpj_pagador_col = _find_column(
+        scoped_df,
+        ["CNPJ Pagador", "cnpj pagador", "CNPJ do Pagador", "cnpj do pagador"],
+    )
+    cliente_pagador_col = _find_column(
+        scoped_df,
+        ["Cliente Pagador", "cliente pagador", "Nome do Cliente Pagador", "nome do cliente pagador"],
+    )
+    vendedor_col = _find_column(
+        scoped_df,
+        [
+            "Login", "login",
+            "Login do Usuario", "login do usuario",
+            "Login do Vendedor", "login do vendedor",
+            "Vendedor", "vendedor",
+            "Nome do Vendedor", "nome do vendedor",
+            "Cod. Vendedor", "cod. vendedor",
+            "Codigo do Vendedor", "codigo do vendedor",
+        ],
+    )
+
+    quant_col = _find_column(
+        scoped_df,
+        [
+            "Quantidade de Volumes", "quantidade de volumes",
+            "Quantidade", "quantidade", "Qtd", "qtd", "Quant", "quant",
+        ],
+    )
+    peso_col = _find_column(
+        scoped_df,
+        [
+            "Peso Calc", "peso calc", "Peso Calculado", "peso calculado",
+            "Peso Real em Kg", "peso real em kg", "Peso", "peso",
+        ],
+    )
+    valmerc_col = _find_column(
+        scoped_df,
+        [
+            "ValMerc", "valmerc", "Valor da Mercadoria", "valor da mercadoria",
+            "Valor Mercadoria", "valor mercadoria",
+        ],
+    )
+
+    if not date_col or not cnpj_pagador_col:
+        return ""
+
+    tmp = scoped_df.copy()
+    tmp["valor_final"] = _compute_valor_frete_final(tmp)
+    tmp["dt"] = _extract_datetime_series(tmp, date_col)
+    tmp["ano"] = tmp["dt"].dt.year
+    tmp["periodo"] = tmp["dt"].dt.to_period("M")
+    tmp["cnpj_key"] = (
+        tmp[cnpj_pagador_col]
+        .astype(str)
+        .str.replace(r"\D", "", regex=True)
+        .str.strip()
+    )
+    tmp["cliente_nome"] = (
+        tmp[cliente_pagador_col].astype(str).str.strip()
+        if cliente_pagador_col
+        else ""
+    )
+    tmp["vendedor_nome"] = (
+        tmp[vendedor_col].astype(str).str.strip()
+        if vendedor_col
+        else ""
+    )
+    tmp["quant"] = _parse_br_numeric(tmp[quant_col]) if quant_col else 0.0
+    tmp["peso"] = _parse_br_numeric(tmp[peso_col]) if peso_col else 0.0
+    tmp["valmerc"] = _parse_br_numeric(tmp[valmerc_col]) if valmerc_col else 0.0
+
+    tmp = tmp.dropna(subset=["valor_final", "ano"])
+    tmp = tmp[(tmp["cnpj_key"] != "") & (tmp["cnpj_key"] != "0")]
+    if tmp.empty:
+        return ""
+
+    months_sorted = sorted(tmp["periodo"].dropna().unique().tolist())
+    if not months_sorted:
+        return ""
+    if target_year is not None:
+        months_yr = [m for m in months_sorted if m.year == target_year]
+        if not months_yr:
+            return ""
+        months_selected = months_yr[-3:]
+    else:
+        months_selected = months_sorted[-3:]
+    months_desc = list(reversed(months_selected))
+
+    logging.info(
+        "Tabela Cliente Pagador | filial=%s | meses selecionados=%s",
+        filial,
+        [f"{p.year}-{p.month:02d}" for p in months_desc],
+    )
+
+    tmp = tmp[tmp["periodo"].isin(months_selected)].copy()
+    if tmp.empty:
+        return ""
+
+    agg = (
+        tmp.groupby(["cnpj_key", "periodo"], as_index=False)[["quant", "peso", "valmerc", "valor_final"]]
+        .sum()
+    )
+
+    nome_por_cnpj = {}
+    vendedor_por_cnpj = {}
+    if cliente_pagador_col:
+        nome_df = tmp[tmp["cliente_nome"] != ""].copy()
+        if not nome_df.empty:
+            for cnpj, group in nome_df.groupby("cnpj_key"):
+                mode_series = group["cliente_nome"].mode()
+                nome_por_cnpj[cnpj] = mode_series.iloc[0] if not mode_series.empty else group["cliente_nome"].iloc[0]
+
+    if vendedor_col:
+        vendedor_df = tmp[tmp["vendedor_nome"] != ""].copy()
+        if not vendedor_df.empty:
+            for cnpj, group in vendedor_df.groupby("cnpj_key"):
+                mode_series = group["vendedor_nome"].mode()
+                vendedor_por_cnpj[cnpj] = mode_series.iloc[0] if not mode_series.empty else group["vendedor_nome"].iloc[0]
+
+    latest_month = months_desc[0]
+    latest_scores = (
+        agg[agg["periodo"] == latest_month][["cnpj_key", "valor_final"]]
+        .set_index("cnpj_key")["valor_final"]
+    )
+    client_order = latest_scores.sort_values(ascending=False).index.tolist()
+    if not client_order:
+        client_order = sorted(tmp["cnpj_key"].unique().tolist())
+
+    max_clientes = 10
+    display_clients = client_order[:max_clientes]
+    has_outros = len(client_order) > max_clientes
+
+    def _month_metrics(frame: pd.DataFrame, month_period) -> tuple[float, float, float, float]:
+        month_data = frame[frame["periodo"] == month_period]
+        if month_data.empty:
+            return 0.0, 0.0, 0.0, 0.0
+        return (
+            float(month_data["quant"].sum()),
+            float(month_data["peso"].sum()),
+            float(month_data["valmerc"].sum()),
+            float(month_data["valor_final"].sum()),
+        )
+
+    def _fmt_num(value: float) -> str:
+        return _format_number_ptbr(value)
+
+    lines = []
+    lines.append("Tabela de Valores por Cliente Pagador (Frete Final)")
+    month_header_cells = ["FILIAL", "CLIENTE", "VENDEDOR"]
+    metric_header_cells = ["", "", ""]
+    for idx, period in enumerate(months_desc):
+        month_title = _month_name_pt(period.month).upper()
+        month_header_cells.extend([month_title, "", "", ""])
+        metric_header_cells.extend(["QUANT", "PESO CALC", "VALMERC", "FRETE TOTAL"])
+        if idx < len(months_desc) - 1:
+            month_header_cells.append("")
+            metric_header_cells.append("CRES")
+    lines.append(" | ".join(month_header_cells))
+    lines.append(" | ".join(metric_header_cells))
+
+    # Linha TOTAL
+    rebuilt_total_cells = [str(filial).upper(), "TOTAL", ""]
+    for idx, period in enumerate(months_desc):
+        q, p, vm, ft = _month_metrics(tmp, period)
+        rebuilt_total_cells.extend([_fmt_num(q), _fmt_num(p), _format_brl(vm), _format_brl(ft)])
+        if idx < len(months_desc) - 1:
+            _, _, _, base_ft = _month_metrics(tmp, months_desc[idx + 1])
+            rebuilt_total_cells.append(_safe_growth_percent(base_ft, ft))
+    lines.append(" | ".join(rebuilt_total_cells))
+
+    # Linhas por cliente pagador
+    for cnpj in display_clients:
+        client_frame = agg[agg["cnpj_key"] == cnpj]
+        label = nome_por_cnpj.get(cnpj, cnpj)
+        vendedor_label = vendedor_por_cnpj.get(cnpj, "")
+        row_cells = [str(filial).upper(), label, vendedor_label]
+
+        for idx, period in enumerate(months_desc):
+            q, p, vm, ft = _month_metrics(client_frame, period)
+            row_cells.extend([_fmt_num(q), _fmt_num(p), _format_brl(vm), _format_brl(ft)])
+            if idx < len(months_desc) - 1:
+                _, _, _, base_ft = _month_metrics(client_frame, months_desc[idx + 1])
+                row_cells.append(_safe_growth_percent(base_ft, ft))
+
+        lines.append(" | ".join(row_cells))
+
+    if has_outros:
+        outros_frame = agg[~agg["cnpj_key"].isin(display_clients)]
+        row_cells = [str(filial).upper(), "OUTROS", ""]
+        for idx, period in enumerate(months_desc):
+            q, p, vm, ft = _month_metrics(outros_frame, period)
+            row_cells.extend([_fmt_num(q), _fmt_num(p), _format_brl(vm), _format_brl(ft)])
+            if idx < len(months_desc) - 1:
+                _, _, _, base_ft = _month_metrics(outros_frame, months_desc[idx + 1])
+                row_cells.append(_safe_growth_percent(base_ft, ft))
+        lines.append(" | ".join(row_cells))
+
+    return "\n".join(lines)
+
+
+def _find_last_movement_date_column(df: pd.DataFrame) -> str | None:
+    preferred_candidates = [
+        "Data da Ultima Ocorrencia",
+        "Data da Ultima Movimentacao",
+        "Data do Ultimo Movimento",
+        "Data da Ultima Interacao",
+        "Data da Ultima Compra",
+        "Data da Ultima Venda",
+        "Data da Ultima Atualizacao",
+        "Data de Inclusao da Ultima Ocorrencia",
+    ]
+    preferred = _find_column(df, preferred_candidates)
+    if preferred:
+        return preferred
+
+    best_col = None
+    best_score = -1
+    for col in df.columns:
+        norm = _normalize_header_name(col)
+        if "data" not in norm:
+            continue
+        if "ultima" not in norm and "ultimo" not in norm:
+            continue
+
+        score = 1
+        if "ocorrencia" in norm:
+            score += 4
+        if "movimento" in norm or "movimentacao" in norm:
+            score += 3
+        if "inclusao" in norm:
+            score += 1
+        if "usuario" in norm:
+            score += 1
+
+        if score > best_score:
+            best_score = score
+            best_col = col
+
+    return best_col
+
+
+def _build_usuarios_afastados_table(totals_df: pd.DataFrame, filial: str) -> str:
+    if totals_df.empty:
+        return ""
+
+    unidade_emissora_col = _find_column(totals_df, ["Unidade Emissora", "unidade emissora", "unidade emissora ", "unidade"])
+    if not unidade_emissora_col:
+        return ""
+
+    filial_norm = str(filial).strip().casefold()
+    scoped_df = totals_df[
+        totals_df[unidade_emissora_col].astype(str).str.strip().str.casefold() == filial_norm
+    ].copy()
+    if scoped_df.empty:
+        return ""
+
+    last_movement_col = _find_last_movement_date_column(scoped_df)
+    if not last_movement_col:
+        logging.info("Tabela de afastados: nenhuma coluna de data de ultimo movimento identificada para filial %s.", filial)
+        return ""
+
+    cliente_col = _find_column(
+        scoped_df,
+        [
+            "Cliente Pagador", "cliente pagador",
+            "Nome do Cliente Pagador", "nome do cliente pagador",
+            "Cliente", "cliente",
+            "Nome do Cliente", "nome do cliente",
+            "Razao Social", "razao social",
+            "Nome Fantasia", "nome fantasia",
+        ],
+    )
+    cnpj_cpf_col = _find_column(
+        scoped_df,
+        [
+            "CNPJ Pagador", "cnpj pagador",
+            "CNPJ do Pagador", "cnpj do pagador",
+            "CNPJ/CPF", "cnpj cpf",
+            "CNPJ", "cnpj",
+            "CPF", "cpf",
+        ],
+    )
+    vendedor_col = _find_column(
+        scoped_df,
+        [
+            "Login", "login",
+            "Login do Usuario", "login do usuario",
+            "Login do Vendedor", "login do vendedor",
+            "Vendedor", "vendedor",
+            "Nome do Vendedor", "nome do vendedor",
+        ],
+    )
+    endereco_col = _find_column(
+        scoped_df,
+        [
+            "Endereco do Pagador", "endereco do pagador",
+            "Endereco Pagador", "endereco pagador",
+            "Endereco do Cliente Pagador", "endereco do cliente pagador",
+            "Endereco", "endereco",
+            "Logradouro", "logradouro",
+            "Endereco do Cliente", "endereco do cliente",
+        ],
+    )
+    cep_col = _find_column(
+        scoped_df,
+        [
+            "CEP do Remetente", "cep do remetente",
+            "CEP do Pagador", "cep do pagador",
+            "CEP cliente remetente", "cep cliente remetente",
+            "CEP cliente", "cep cliente",
+            "CEP do Cliente Pagador", "cep do cliente pagador",
+            "CEP", "cep",
+        ],
+    )
+    fone_col = _find_column(
+        scoped_df,
+        [
+            "Fone do Pagador", "fone do pagador",
+            "Telefone do Pagador", "telefone do pagador",
+            "Telefone do Cliente Pagador", "telefone do cliente pagador",
+            "Fone cliente remetente", "fone cliente remetente",
+            "Telefone cliente remetente", "telefone cliente remetente",
+            "Telefone cliente", "telefone cliente",
+            "Fone", "fone",
+            "Telefone", "telefone",
+            "Celular", "celular",
+        ],
+    )
+    cidade_col = _find_column(
+        scoped_df,
+        [
+            "Cidade do Pagador", "cidade do pagador",
+            "Cidade", "cidade",
+            "Cidade do Remetente", "cidade do remetente",
+            "Cidade do Destinatario", "cidade do destinatario",
+            "Municipio", "municipio",
+        ],
+    )
+    uf_col = _find_column(scoped_df, ["UF do Pagador", "uf do pagador", "UF", "uf", "UF Destinatario", "UF Remetente", "Estado", "estado"])
+    ie_col = _find_column(
+        scoped_df,
+        [
+            "IE cliente remetente", "ie cliente remetente",
+            "IE do Pagador", "ie do pagador",
+            "IE", "ie",
+            "Inscricao Estadual", "inscricao estadual",
+            "Inscricao", "inscricao",
+        ],
+    )
+
+    tmp = scoped_df.copy()
+    tmp["ultimo_movimento_dt"] = pd.to_datetime(tmp[last_movement_col], dayfirst=True, errors="coerce")
+    if tmp["ultimo_movimento_dt"].isna().all():
+        # Fallback para casos com formato alternativo ou com timezone/hora inconsistente.
+        tmp["ultimo_movimento_dt"] = pd.to_datetime(tmp[last_movement_col], errors="coerce")
+    tmp = tmp.dropna(subset=["ultimo_movimento_dt"])
+    if tmp.empty:
+        return ""
+
+    if cnpj_cpf_col:
+        tmp["entidade_key"] = (
+            tmp[cnpj_cpf_col]
+            .astype(str)
+            .str.replace(r"\D", "", regex=True)
+            .str.strip()
+        )
+    else:
+        tmp["entidade_key"] = ""
+
+    if cliente_col:
+        cliente_nome_series = tmp[cliente_col].astype(str).str.strip()
+    else:
+        cliente_nome_series = pd.Series("", index=tmp.index, dtype="object")
+    fallback_key = cliente_nome_series.str.casefold().replace("", pd.NA)
+    tmp["entidade_key"] = tmp["entidade_key"].where(tmp["entidade_key"] != "", fallback_key)
+    tmp = tmp.dropna(subset=["entidade_key"])
+    if tmp.empty:
+        return ""
+
+    idx_latest = tmp.groupby("entidade_key")["ultimo_movimento_dt"].idxmax()
+    latest_rows = tmp.loc[idx_latest].copy()
+
+    today = pd.Timestamp.now().normalize()
+    latest_rows["dias_sem_mov"] = (today - latest_rows["ultimo_movimento_dt"]).dt.days
+    afastados = latest_rows[latest_rows["dias_sem_mov"] > 30].copy()
+    if afastados.empty:
+        return ""
+
+    afastados = afastados.sort_values(by=["dias_sem_mov", "ultimo_movimento_dt"], ascending=[False, True])
+
+    def _safe_text(series_col: str | None, frame: pd.DataFrame, default: str = "") -> pd.Series:
+        if not series_col:
+            return pd.Series(default, index=frame.index, dtype="object")
+        raw = frame[series_col]
+        cleaned = raw.where(raw.notna(), default).astype(str).str.strip()
+        return cleaned.replace({"nan": default, "None": default})
+
+    def _truncate_text(value: str, max_len: int) -> str:
+        text = str(value).strip()
+        if len(text) <= max_len:
+            return text
+        return text[: max(1, max_len - 3)].rstrip() + "..."
+
+    cliente_s = _safe_text(cliente_col, afastados)
+    cnpj_s = _safe_text(cnpj_cpf_col, afastados)
+    vendedor_s = _safe_text(vendedor_col, afastados)
+    endereco_s = _safe_text(endereco_col, afastados)
+    cep_s = _safe_text(cep_col, afastados)
+    fone_s = _safe_text(fone_col, afastados)
+    cidade_s = _safe_text(cidade_col, afastados)
+    uf_s = _safe_text(uf_col, afastados).str.upper()
+    ie_s = _safe_text(ie_col, afastados)
+
+    max_rows = 30
+    if len(afastados) > max_rows:
+        afastados = afastados.head(max_rows)
+        cliente_s = cliente_s.loc[afastados.index]
+        cnpj_s = cnpj_s.loc[afastados.index]
+        vendedor_s = vendedor_s.loc[afastados.index]
+        endereco_s = endereco_s.loc[afastados.index]
+        cep_s = cep_s.loc[afastados.index]
+        fone_s = fone_s.loc[afastados.index]
+        cidade_s = cidade_s.loc[afastados.index]
+        uf_s = uf_s.loc[afastados.index]
+        ie_s = ie_s.loc[afastados.index]
+
+    lines = []
+    lines.append("Tabela de Clientes sem contato (+30 dias)")
+    lines.append("CLIENTE | CNPJ/CPF | VENDEDOR | ENDERECO | CEP | FONE | CIDADE | UF | FIL | ULTIMO MOVIMENTO | IE")
+
+    for idx in afastados.index:
+        ultimo_mov = afastados.at[idx, "ultimo_movimento_dt"]
+        ultimo_mov_fmt = ultimo_mov.strftime("%d/%m/%Y") if pd.notna(ultimo_mov) else ""
+        row_cells = [
+            _truncate_text(cliente_s.at[idx], 32),
+            _truncate_text(cnpj_s.at[idx], 18),
+            _truncate_text(vendedor_s.at[idx], 10),
+            _truncate_text(endereco_s.at[idx], 34),
+            _truncate_text(cep_s.at[idx], 9),
+            _truncate_text(fone_s.at[idx], 14),
+            _truncate_text(cidade_s.at[idx], 18),
+            uf_s.at[idx],
+            str(filial).upper(),
+            ultimo_mov_fmt,
+            _truncate_text(ie_s.at[idx], 16),
+        ]
+        lines.append(" | ".join(row_cells))
+
+    logging.info(
+        "Tabela de afastados gerada para filial=%s usando coluna de data='%s' com %s linhas.",
+        filial,
+        last_movement_col,
+        len(afastados),
+    )
+    return "\n".join(lines)
+
+
 def _extract_frete_tables_for_pdf(
     insight_text: str,
-) -> tuple[list[list[str]], list[list[str]], list[list[str]], list[list[str]], list[list[str]], list[str]]:
+) -> tuple[list[list[str]], list[list[str]], list[list[str]], list[list[str]], list[list[str]], list[list[str]], list[list[str]], list[str]]:
     summary_table: list[list[str]] = []
     detail_table: list[list[str]] = []
     expedidos_table: list[list[str]] = []
     recebidos_table: list[list[str]] = []
     uf_table: list[list[str]] = []
+    clientes_table: list[list[str]] = []
+    afastados_table: list[list[str]] = []
     metric_lines: list[str] = []
 
     section = None
@@ -795,14 +1722,30 @@ def _extract_frete_tables_for_pdf(
             section = "uf"
             continue
 
-        if line.startswith("Linha |") and section in {"expedidos", "recebidos", "uf"}:
+        if line.startswith("Tabela de Valores por Cliente Pagador"):
+            section = "clientes"
+            continue
+
+        if line.startswith("Tabela de Usuarios Afastados") or line.startswith("Tabela de Clientes sem contato"):
+            section = "afastados"
+            continue
+
+        if line.startswith("Linha |") and section in {"expedidos", "recebidos", "uf", "clientes", "afastados"}:
             row = [cell.strip() for cell in line.split("|")]
             if section == "expedidos":
                 expedidos_table.append(row)
             elif section == "recebidos":
                 recebidos_table.append(row)
+            elif section == "clientes":
+                clientes_table.append(row)
+            elif section == "afastados":
+                afastados_table.append(row)
             else:
                 uf_table.append(row)
+            continue
+
+        if line.startswith("CLIENTE |") and section == "afastados":
+            afastados_table.append([cell.strip() for cell in line.split("|")])
             continue
 
         if line.startswith("Linha |"):
@@ -819,7 +1762,7 @@ def _extract_frete_tables_for_pdf(
             section = "metrics"
             continue
 
-        if section in {"summary", "detail", "expedidos", "recebidos", "uf"} and "|" in line:
+        if section in {"summary", "detail", "expedidos", "recebidos", "uf", "clientes", "afastados"} and "|" in line:
             row = [cell.strip() for cell in line.split("|")]
             if section == "summary":
                 summary_table.append(row)
@@ -829,6 +1772,10 @@ def _extract_frete_tables_for_pdf(
                 expedidos_table.append(row)
             elif section == "recebidos":
                 recebidos_table.append(row)
+            elif section == "clientes":
+                clientes_table.append(row)
+            elif section == "afastados":
+                afastados_table.append(row)
             else:
                 uf_table.append(row)
             continue
@@ -836,7 +1783,7 @@ def _extract_frete_tables_for_pdf(
         if section == "metrics" and line.startswith("-"):
             metric_lines.append(line)
 
-    return summary_table, detail_table, expedidos_table, recebidos_table, uf_table, metric_lines
+    return summary_table, detail_table, expedidos_table, recebidos_table, uf_table, clientes_table, afastados_table, metric_lines
 
 
 def _draw_table_on_canvas(pdf: canvas.Canvas, title: str, table_data: list[list[str]], y_start: float) -> float:
@@ -846,33 +1793,220 @@ def _draw_table_on_canvas(pdf: canvas.Canvas, title: str, table_data: list[list[
     pdf.setFont("Helvetica-Bold", 10)
     pdf.drawString(50, y_start - 4, title)
 
+    page_width, _ = pdf._pagesize
+    usable_width = max(float(page_width) - 90.0, 360.0)
+
     col_count = len(table_data[0])
     if col_count == 6:
         col_widths = [90, 60, 105, 60, 105, 80]
+        font_size = 8
     elif col_count == 4:
         col_widths = [120, 130, 130, 120]
+        font_size = 8
     elif col_count == 3:
         col_widths = [180, 120, 200]
+        font_size = 8
+    elif col_count == 12:
+        # Tabela mensal 2 meses: Filial, Cliente, Vendedor + 2 blocos
+        # bloco atual tem CRES (5 cols), bloco base sem CRES (4 cols) → total 12 cols
+        base_widths_12 = [18, 110, 36, 26, 36, 52, 46, 20, 26, 36, 52, 46]
+        # soma = 504; escala pelo usable_width
+        scale_12 = min(1.0, usable_width / float(sum(base_widths_12)))
+        col_widths = [w * scale_12 for w in base_widths_12]
+        font_size = 6.5 if scale_12 >= 0.95 else 6.0
+    elif col_count == 11:
+        # Layout da tabela de usuarios afastados (referencia cliente): melhor leitura em landscape.
+        base_widths_11 = [120, 70, 50, 150, 48, 58, 78, 24, 24, 70, 56]
+        scale_11 = min(1.0, usable_width / float(sum(base_widths_11)))
+        col_widths = [w * scale_11 for w in base_widths_11]
+        font_size = 6.3 if scale_11 >= 0.9 else 6.0
+    elif col_count >= 13:
+        # Tabelas mensais mais largas (ex.: Cliente Pagador 3 meses)
+        if col_count == 17:
+            # Calibrado para landscape letter (usable ~702pt).
+            # Filial=18, Cliente=112, Vendedor=38; por bloco: Q=26, Peso=36, VM=54, Frete=48, Cres=18
+            # bloco c/ CRES = 182; bloco s/ CRES = 164
+            # total base = 18+112+38 + 182+182+164 = 696pt
+            base_widths_17 = [18, 112, 38, 26, 36, 54, 48, 18, 26, 36, 54, 48, 18, 26, 36, 54, 48]
+            scale_17 = min(1.0, usable_width / float(sum(base_widths_17)))
+            col_widths = [w * scale_17 for w in base_widths_17]
+            font_size = 6.5 if scale_17 >= 0.90 else 6.0
+        elif col_count == 16:
+            # Layout fixo mais compacto para 3 meses sem vendedor.
+            base_widths_16 = [18, 120, 24, 34, 52, 46, 16, 24, 34, 52, 46, 16, 24, 34, 52, 46]
+            scale_16 = min(1.0, usable_width / float(sum(base_widths_16)))
+            col_widths = [w * scale_16 for w in base_widths_16]
+            font_size = 6.5 if scale_16 >= 0.90 else 6.0
+        else:
+            base_col_widths = [30, 82]
+            month_triplet = [22, 24, 30, 34, 20]
+            month_last = [22, 24, 30, 34]
+
+            remaining = col_count - 2
+            dynamic_widths = []
+            while remaining > 0:
+                if remaining >= 5:
+                    dynamic_widths.extend(month_triplet)
+                    remaining -= 5
+                else:
+                    dynamic_widths.extend(month_last[:remaining])
+                    remaining = 0
+
+            col_widths = base_col_widths + dynamic_widths
+
+        font_size = 5.0
     else:
         col_widths = [500 / max(col_count, 1)] * col_count
+        font_size = 8
+
+    def _truncate_to_width(text: str, max_width_pt: float, font_name: str, size: float) -> str:
+        normalized = str(text).strip()
+        if not normalized:
+            return ""
+        if stringWidth(normalized, font_name, size) <= max_width_pt:
+            return normalized
+
+        ellipsis = "..."
+        ellipsis_w = stringWidth(ellipsis, font_name, size)
+        if ellipsis_w >= max_width_pt:
+            return ellipsis
+
+        kept = normalized
+        target_width = max_width_pt - ellipsis_w
+        while kept and stringWidth(kept, font_name, size) > target_width:
+            kept = kept[:-1]
+        return (kept.rstrip() + ellipsis) if kept else ellipsis
+
+    if col_count == 11:
+        # Evita atropelo na tabela de clientes sem contato usando truncamento por largura real da celula.
+        normalized_rows: list[list[str]] = []
+        for row_idx, row in enumerate(table_data):
+            current = []
+            for col_idx, cell in enumerate(row):
+                cell_text = str(cell).strip()
+                if row_idx == 0:
+                    current.append(cell_text)
+                    continue
+
+                # Reserva pequena margem para padding e grade da tabela.
+                available_width = max(float(col_widths[col_idx]) - 4.0, 6.0)
+                if col_idx in {7, 8, 9}:  # UF, FIL e data costumam caber naturalmente.
+                    current.append(cell_text)
+                else:
+                    current.append(_truncate_to_width(cell_text, available_width, "Helvetica", float(font_size)))
+            normalized_rows.append(current)
+        table_data = normalized_rows
 
     table = Table(table_data, colWidths=col_widths)
-    table.setStyle(
-        TableStyle(
-            [
-                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0B2C6B")),
-                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                ("FONTSIZE", (0, 0), (-1, -1), 8),
-                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-                ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
-                ("BACKGROUND", (0, 1), (-1, -1), colors.whitesmoke),
-                ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
-            ]
-        )
+    style_commands = [
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0B2C6B")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), font_size),
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
+        ("BACKGROUND", (0, 1), (-1, -1), colors.whitesmoke),
+        ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 2),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 2),
+        ("TOPPADDING", (0, 0), (-1, -1), 1),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 1),
+    ]
+
+    is_cliente_mensal = (
+        col_count >= 12
+        and len(table_data) >= 2
+        and any(str(cell).strip().upper() == "QUANT" for cell in table_data[1][:6])
     )
 
-    width, height = table.wrapOn(pdf, 520, 700)
+    if is_cliente_mensal:
+        style_commands.append(("BACKGROUND", (0, 0), (-1, 1), colors.HexColor("#0B2C6B")))
+        style_commands.append(("TEXTCOLOR", (0, 0), (-1, 1), colors.white))
+        style_commands.append(("FONTNAME", (0, 0), (-1, 1), "Helvetica-Bold"))
+        style_commands.append(("BACKGROUND", (0, 2), (-1, -1), colors.whitesmoke))
+
+        style_commands.append(("SPAN", (0, 0), (0, 1)))
+        style_commands.append(("SPAN", (1, 0), (1, 1)))
+        style_commands.append(("SPAN", (2, 0), (2, 1)))
+
+        if col_count == 17:
+            block_starts = [3, 8, 13]
+        elif col_count == 12:
+            block_starts = [3, 8]
+        elif col_count == 16:
+            block_starts = [2, 7, 12]
+        else:
+            block_starts = [2]
+            if col_count >= 7:
+                block_starts.append(7)
+            if col_count >= 12:
+                block_starts.append(12)
+
+        for start in block_starts:
+            end = min(start + 4, col_count - 1)
+            style_commands.append(("SPAN", (start, 0), (end, 0)))
+            style_commands.append(("FONTNAME", (start, 1), (end, 1), "Helvetica-Bold"))
+        style_commands.append(("LINEBELOW", (0, 1), (-1, 1), 0.75, colors.black))
+
+    if col_count >= 12:
+        data_start_row = 2 if is_cliente_mensal else 1
+        left_end_col = 2 if col_count in {12, 17} else 1
+        style_commands.append(("ALIGN", (0, data_start_row), (left_end_col, -1), "LEFT"))
+        style_commands.append(("LEFTPADDING", (1, 0), (left_end_col, -1), 1))
+        style_commands.append(("RIGHTPADDING", (0, 0), (-1, -1), 1))
+
+        if is_cliente_mensal:
+            if col_count == 12:
+                numeric_cols = [3, 4, 5, 6, 8, 9, 10, 11]
+                growth_cols = [7]
+            elif col_count == 17:
+                numeric_cols = [3, 4, 5, 6, 8, 9, 10, 11, 13, 14, 15, 16]
+                growth_cols = [7, 12]
+            else:
+                numeric_cols = []
+                growth_cols = []
+
+            for col_idx in numeric_cols:
+                style_commands.append(("ALIGN", (col_idx, data_start_row), (col_idx, -1), "RIGHT"))
+            for col_idx in growth_cols:
+                style_commands.append(("ALIGN", (col_idx, data_start_row), (col_idx, -1), "CENTER"))
+
+    if col_count == 11:
+        style_commands.append(("ALIGN", (0, 1), (6, -1), "LEFT"))
+        style_commands.append(("ALIGN", (7, 1), (8, -1), "CENTER"))
+        style_commands.append(("ALIGN", (9, 1), (9, -1), "CENTER"))
+        style_commands.append(("ALIGN", (10, 1), (10, -1), "LEFT"))
+
+    header_row_idx = 1 if is_cliente_mensal else 0
+    growth_columns = {
+        idx for idx, header in enumerate(table_data[header_row_idx]) if _is_growth_header(header)
+    }
+    first_data_row = 2 if is_cliente_mensal else 1
+    for row_idx in range(first_data_row, len(table_data)):
+        row = table_data[row_idx]
+        for col_idx, cell in enumerate(row):
+            if col_idx in growth_columns:
+                style_commands.append(("FONTNAME", (col_idx, row_idx), (col_idx, row_idx), "Helvetica-Bold"))
+            if col_idx in growth_columns and _is_negative_display_value(str(cell)):
+                style_commands.append(("TEXTCOLOR", (col_idx, row_idx), (col_idx, row_idx), colors.red))
+
+    table.setStyle(TableStyle(style_commands))
+
+    width, height = table.wrapOn(pdf, usable_width, 700)
+
+    # Para tabelas muito largas, reduz proporcionalmente para caber na pagina sem truncar.
+    if width > usable_width:
+        scale = usable_width / float(width)
+        draw_y = y_start - 30 - (height * scale)
+
+        pdf.saveState()
+        pdf.translate(45, draw_y)
+        pdf.scale(scale, scale)
+        table.drawOn(pdf, 0, 0)
+        pdf.restoreState()
+
+        return y_start - 40 - (height * scale)
+
     table.drawOn(pdf, 45, y_start - 30 - height)
     return y_start - 40 - height
 
@@ -918,26 +2052,30 @@ def _draw_summary_table_example_layout(
 
     col_widths = [120, 70, 95, 70, 95, 90]
     table = Table(table_data, colWidths=col_widths)
-    table.setStyle(
-        TableStyle(
-            [
-                ("SPAN", (0, 0), (0, 2)),
-                ("SPAN", (1, 0), (4, 0)),
-                ("SPAN", (1, 1), (2, 1)),
-                ("SPAN", (3, 1), (4, 1)),
-                ("SPAN", (5, 0), (5, 2)),
-                ("BACKGROUND", (0, 0), (-1, 2), colors.HexColor("#0B2C6B")),
-                ("TEXTCOLOR", (0, 0), (-1, 2), colors.white),
-                ("FONTNAME", (0, 0), (-1, 2), "Helvetica-Bold"),
-                ("FONTSIZE", (0, 0), (-1, -1), 8),
-                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
-                ("BACKGROUND", (0, 3), (-1, -1), colors.whitesmoke),
-                ("FONTNAME", (0, 3), (-1, -1), "Helvetica"),
-            ]
-        )
-    )
+    style_commands = [
+        ("SPAN", (0, 0), (0, 2)),
+        ("SPAN", (1, 0), (4, 0)),
+        ("SPAN", (1, 1), (2, 1)),
+        ("SPAN", (3, 1), (4, 1)),
+        ("SPAN", (5, 0), (5, 2)),
+        ("BACKGROUND", (0, 0), (-1, 2), colors.HexColor("#0B2C6B")),
+        ("TEXTCOLOR", (0, 0), (-1, 2), colors.white),
+        ("FONTNAME", (0, 0), (-1, 2), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
+        ("BACKGROUND", (0, 3), (-1, -1), colors.whitesmoke),
+        ("FONTNAME", (0, 3), (-1, -1), "Helvetica"),
+    ]
+
+    # No layout resumido, a coluna 5 representa Desempenho.
+    for row_idx in range(3, len(table_data)):
+        row = table_data[row_idx]
+        if len(row) > 5 and _is_negative_display_value(str(row[5])):
+            style_commands.append(("TEXTCOLOR", (5, row_idx), (5, row_idx), colors.red))
+
+    table.setStyle(TableStyle(style_commands))
 
     width, height = table.wrapOn(pdf, 520, 700)
     table.drawOn(pdf, 45, y_start - 30 - height)
@@ -998,6 +2136,16 @@ def _build_rule_based_insights(
     if uf_table:
         lines.append("")
         lines.append(uf_table)
+
+    clientes_table = _build_cliente_pagador_table(totals_df, filial)
+    if clientes_table:
+        lines.append("")
+        lines.append(clientes_table)
+
+    afastados_table = _build_usuarios_afastados_table(totals_df, filial)
+    if afastados_table:
+        lines.append("")
+        lines.append(afastados_table)
 
     metric_source_df = scoped_df if not scoped_df.empty else branch_df
     numeric_cols = []
@@ -1148,6 +2296,7 @@ def process_csv(mytimer: func.TimerRequest) -> None:
         )
 
         file_system = service_client.get_file_system_client("raw")
+        filiais_mapping = _load_filiais_mapping(service_client)
 
         df = _read_csv_from_datalake(file_system, RECIPIENTS_CSV_PATH, sep=",")
         allowed_units = {
@@ -1203,6 +2352,7 @@ def process_csv(mytimer: func.TimerRequest) -> None:
         for _, row in df.iterrows():
             email = row["email"]
             filial = str(row["filial"]).strip()
+            filial_display = filiais_mapping.get(filial.casefold(), filial)
             cpf = str(row["cpf"])
 
             # Mantem uma versao estruturada para o PDF (sem depender de refinamento por IA).
@@ -1228,11 +2378,25 @@ def process_csv(mytimer: func.TimerRequest) -> None:
                 str(filial),
                 totals_source_df=insights_df,
             )
-            summary_table, detail_table, expedidos_table, recebidos_table, uf_table, metric_lines = _extract_frete_tables_for_pdf(raw_insight_for_pdf)
+            summary_table, detail_table, expedidos_table, recebidos_table, uf_table, clientes_table, afastados_table, metric_lines = _extract_frete_tables_for_pdf(raw_insight_for_pdf)
+
+            # Tabela de Cliente Pagador do ano anterior (mesmo trimestre)
+            prev_year = pd.Timestamp.now().year - 1
+            clientes_prev_text = _build_cliente_pagador_table(
+                insights_df if not insights_df.empty else pd.DataFrame(),
+                filial,
+                target_year=prev_year,
+            )
+            _, _, _, _, _, clientes_prev_table, _, _ = _extract_frete_tables_for_pdf(clientes_prev_text)
 
             senha_pdf = cpf[:3]
 
-            logging.info("Processando: %s | Filial: %s", email, filial)
+            logging.info(
+                "Processando: %s | Filial sigla: %s | Filial exibicao: %s",
+                email,
+                filial,
+                filial_display,
+            )
 
             pdf_path = None
             try:
@@ -1243,19 +2407,20 @@ def process_csv(mytimer: func.TimerRequest) -> None:
                 c = canvas.Canvas(pdf_path, pagesize=letter)
 
                 c.drawString(100, 770, "Relatorio Operacional - Cruzeiro")
-                c.drawString(100, 750, f"Filial: {filial}")
+                c.drawString(100, 750, f"Filial: {filial_display}")
 
                 y = 700
 
-                total_comment = _build_soft_operational_comment(summary_table, str(filial), "total")
+                y = _draw_summary_table_example_layout(c, str(filial_display), summary_table, y)
+                total_comment = _build_operational_comment(summary_table, str(filial_display), "total")
                 if total_comment:
-                    if y <= 140:
+                    y -= 6
+                    if y <= 120:
                         c.showPage()
                         y = 760
                     y = _draw_wrapped_text(c, total_comment, y, x=50, max_width=520)
                     y -= 8
 
-                y = _draw_summary_table_example_layout(c, str(filial), summary_table, y)
                 y -= 24
                 y = _draw_table_on_canvas(c, "Detalhe CV/CP/FV/FP", detail_table, y)
 
@@ -1263,48 +2428,111 @@ def process_csv(mytimer: func.TimerRequest) -> None:
                     if y <= 180:
                         c.showPage()
                         y = 760
-                    y -= 18
-                    exp_comment = _build_soft_operational_comment(expedidos_table, str(filial), "expedidos")
-                    if exp_comment:
-                        y = _draw_wrapped_text(c, exp_comment, y, x=50, max_width=520)
-                        y -= 6
                     y = _draw_summary_table_example_layout(
                         c,
-                        str(filial),
+                        str(filial_display),
                         expedidos_table,
                         y,
                         bloco_titulo="EXPEDIDOS",
                         secao_titulo="Valores Expedidos (Frete Final)",
                     )
+                    exp_comment = _build_operational_comment(expedidos_table, str(filial_display), "expedidos")
+                    if exp_comment:
+                        y -= 6
+                        if y <= 120:
+                            c.showPage()
+                            y = 760
+                        y = _draw_wrapped_text(c, exp_comment, y, x=50, max_width=520)
+                        y -= 8
 
                 if recebidos_table:
                     if y <= 180:
                         c.showPage()
                         y = 760
-                    y -= 18
-                    rec_comment = _build_soft_operational_comment(recebidos_table, str(filial), "recebidos")
-                    if rec_comment:
-                        y = _draw_wrapped_text(c, rec_comment, y, x=50, max_width=520)
-                        y -= 6
                     y = _draw_summary_table_example_layout(
                         c,
-                        str(filial),
+                        str(filial_display),
                         recebidos_table,
                         y,
                         bloco_titulo="RECEBIDOS",
                         secao_titulo="Valores Recebidos (Frete Final)",
                     )
+                    rec_comment = _build_operational_comment(recebidos_table, str(filial_display), "recebidos")
+                    if rec_comment:
+                        y -= 6
+                        if y <= 120:
+                            c.showPage()
+                            y = 760
+                        y = _draw_wrapped_text(c, rec_comment, y, x=50, max_width=520)
+                        y -= 8
 
                 if uf_table:
                     if y <= 180:
                         c.showPage()
                         y = 760
-                    y -= 18
-                    uf_comment = _build_soft_operational_comment(uf_table, str(filial), "fluxos para fora do estado")
-                    if uf_comment:
-                        y = _draw_wrapped_text(c, uf_comment, y, x=50, max_width=520)
-                        y -= 6
                     y = _draw_table_on_canvas(c, "Valores por UF (Frete Final)", uf_table, y)
+                    uf_comment = _build_operational_comment(uf_table, str(filial_display), "fluxos para fora do estado")
+                    if uf_comment:
+                        y -= 6
+                        if y <= 120:
+                            c.showPage()
+                            y = 760
+                        y = _draw_wrapped_text(c, uf_comment, y, x=50, max_width=520)
+                        y -= 8
+
+                if clientes_table:
+                    if CLIENTES_TABLE_LANDSCAPE:
+                        has_afastados_landscape = bool(afastados_table and AFASTADOS_TABLE_LANDSCAPE)
+                        c.showPage()
+                        c.setPageSize(landscape(letter))
+                        land_w, land_h = landscape(letter)
+                        y_land = land_h - 40
+                        cur_year = pd.Timestamp.now().year
+                        y_land = _draw_table_on_canvas(
+                            c,
+                            f"Valores por Cliente Pagador (Frete Final) — {cur_year}",
+                            clientes_table,
+                            y_land,
+                        )
+                        if clientes_prev_table:
+                            y_land -= 20
+                            if y_land > 80:
+                                _draw_table_on_canvas(
+                                    c,
+                                    f"Valores por Cliente Pagador (Frete Final) — {cur_year - 1}",
+                                    clientes_prev_table,
+                                    y_land,
+                                )
+                        if not has_afastados_landscape:
+                            c.showPage()
+                            c.setPageSize(letter)
+                            y = 760
+                    else:
+                        if y <= 180:
+                            c.showPage()
+                            y = 760
+                        y = _draw_table_on_canvas(c, "Valores por Cliente Pagador (Frete Final)", clientes_table, y)
+
+                if afastados_table:
+                    if AFASTADOS_TABLE_LANDSCAPE:
+                        c.showPage()
+                        c.setPageSize(landscape(letter))
+                        _, land_h = landscape(letter)
+                        y_land = land_h - 40
+                        y_land = _draw_table_on_canvas(
+                            c,
+                            "Clientes sem contato (+30 dias)",
+                            afastados_table,
+                            y_land,
+                        )
+                        c.showPage()
+                        c.setPageSize(letter)
+                        y = 760
+                    else:
+                        if y <= 180:
+                            c.showPage()
+                            y = 760
+                        y = _draw_table_on_canvas(c, "Clientes sem contato (+30 dias)", afastados_table, y)
 
                 if metric_lines:
                     if y <= 140:
@@ -1316,7 +2544,12 @@ def process_csv(mytimer: func.TimerRequest) -> None:
                     c.drawString(50, y, "Insights Complementares")
                     y -= 18
 
-                    for line in metric_lines[:8]:
+                    visible_metric_lines = metric_lines[:8]
+                    for idx, line in enumerate(visible_metric_lines):
+                        if y <= 120:
+                            c.showPage()
+                            y = 760
+
                         metric_type, metric_name, formatted_values = _format_metric_line_for_pdf(line)
                         if metric_type and metric_name:
                             c.setFont("Helvetica-Bold", 8.5)
@@ -1329,6 +2562,10 @@ def process_csv(mytimer: func.TimerRequest) -> None:
                             c.setFont("Helvetica", 8)
                             c.drawString(55, y, line)
                             y -= 10
+
+                        # Linha em branco entre um item e o proximo titulo/valor.
+                        if idx < len(visible_metric_lines) - 1:
+                            y -= 8
 
                 c.save()
 
