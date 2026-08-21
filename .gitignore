@@ -69,3 +69,6 @@ __azurite_db*__.json
 deploy.zip
 wheelhouse/
 *.vtt
+
+# Local project inputs and generated reports
+_infos/

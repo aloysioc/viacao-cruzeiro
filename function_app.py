@@ -723,6 +723,15 @@ def _build_ai_operational_comment_if_configured(
     try:
         with urllib.request.urlopen(request, timeout=15) as response:
             data = json.loads(response.read().decode("utf-8"))
+            usage = data.get("usage") or {}
+            logging.info(
+                "Uso Azure OpenAI | tipo=comentario_operacional | filial=%s | bloco=%s | prompt_tokens=%s | completion_tokens=%s | total_tokens=%s",
+                filial,
+                bloco_nome,
+                usage.get("prompt_tokens"),
+                usage.get("completion_tokens"),
+                usage.get("total_tokens"),
+            )
             choices = data.get("choices") or []
             if not choices:
                 return None
@@ -2237,6 +2246,14 @@ def _refine_with_ai_if_configured(raw_insights: str, filial: str) -> str:
     try:
         with urllib.request.urlopen(request, timeout=30) as response:
             data = json.loads(response.read().decode("utf-8"))
+            usage = data.get("usage") or {}
+            logging.info(
+                "Uso Azure OpenAI | tipo=resumo_executivo | filial=%s | prompt_tokens=%s | completion_tokens=%s | total_tokens=%s",
+                filial,
+                usage.get("prompt_tokens"),
+                usage.get("completion_tokens"),
+                usage.get("total_tokens"),
+            )
             choices = data.get("choices") or []
             if choices:
                 content = choices[0].get("message", {}).get("content", "").strip()
