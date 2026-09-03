@@ -1,0 +1,173 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1920" height="1080" viewBox="0 0 1920 1080">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#EDF7FC"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#0078D4"/>
+      <stop offset="1" stop-color="#25B7E8"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="9" stdDeviation="13" flood-color="#163A55" flood-opacity=".14"/>
+    </filter>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M0 0 L12 6 L0 12 Z" fill="#168BC4"/>
+    </marker>
+    <style>
+      .title { font: 700 48px 'Segoe UI', Arial, sans-serif; fill: #102D42; }
+      .subtitle { font: 400 22px 'Segoe UI', Arial, sans-serif; fill: #527188; }
+      .eyebrow { font: 700 17px 'Segoe UI', Arial, sans-serif; letter-spacing: 2.5px; fill: #0078D4; }
+      .section { font: 700 25px 'Segoe UI', Arial, sans-serif; fill: #14354B; }
+      .label { font: 700 19px 'Segoe UI', Arial, sans-serif; fill: #153C56; }
+      .body { font: 400 16px 'Segoe UI', Arial, sans-serif; fill: #55768C; }
+      .small { font: 400 14px 'Segoe UI', Arial, sans-serif; fill: #67879A; }
+      .chip { font: 700 13px 'Segoe UI', Arial, sans-serif; fill: #13658E; }
+      .card { fill: #FFFFFF; stroke: #C7DFEC; stroke-width: 2; }
+      .azure-card { fill: #F7FCFF; stroke: #55B5E1; stroke-width: 2; }
+    </style>
+  </defs>
+
+  <rect width="1920" height="1080" fill="url(#bg)"/>
+  <circle cx="1815" cy="48" r="255" fill="#0078D4" opacity=".055"/>
+  <circle cx="75" cy="1030" r="250" fill="#32B0DF" opacity=".06"/>
+
+  <g transform="translate(82 66)">
+    <text class="eyebrow" x="0" y="0">VIAÇÃO CRUZEIRO · MICROSOFT AZURE</text>
+    <text class="title" x="0" y="62">Arquitetura de relatórios operacionais</text>
+    <text class="subtitle" x="0" y="101">Dados consolidados, análises com IA e distribuição segura por filial</text>
+    <rect x="0" y="128" width="1756" height="5" rx="3" fill="url(#accent)"/>
+  </g>
+
+  <g transform="translate(82 236)" filter="url(#shadow)">
+    <rect class="card" width="286" height="630" rx="28"/>
+    <rect width="286" height="9" rx="5" fill="#45BCEB"/>
+    <circle cx="72" cy="76" r="34" fill="#E8F7FD" stroke="#45BCEB" stroke-width="2"/>
+    <text x="72" y="83" text-anchor="middle" style="font:700 18px 'Segoe UI';fill:#173C52">Git</text>
+    <text class="section" x="34" y="138">Código versionado</text>
+    <text class="body" x="34" y="174">GitHub</text>
+    <text class="body" x="34" y="201">function_app.py</text>
+    <text class="body" x="34" y="228">requirements.txt</text>
+    <text class="body" x="34" y="255">documentação técnica</text>
+    <line x1="34" y1="292" x2="252" y2="292" stroke="#D6E8F1"/>
+    <rect x="34" y="324" width="218" height="54" rx="27" fill="#E5F5FC"/>
+    <text class="chip" x="143" y="357" text-anchor="middle">PUBLICAÇÃO CONTROLADA</text>
+    <text class="small" x="34" y="421">Versão única e auditável</text>
+    <text class="small" x="34" y="448">para retomada segura</text>
+    <g transform="translate(34 504)">
+      <circle cx="8" cy="7" r="5" fill="#16A0D4"/><text class="small" x="24" y="12">Revisão</text>
+      <circle cx="8" cy="43" r="5" fill="#16A0D4"/><text class="small" x="24" y="48">Commit</text>
+      <circle cx="8" cy="79" r="5" fill="#16A0D4"/><text class="small" x="24" y="84">Deploy</text>
+    </g>
+  </g>
+
+  <path d="M380 551 L438 551" stroke="#168BC4" stroke-width="5" fill="none" marker-end="url(#arrow)"/>
+
+  <g transform="translate(450 206)">
+    <rect width="1070" height="690" rx="34" fill="#F4FAFD" stroke="#5DAFD5" stroke-width="2" stroke-dasharray="10 8"/>
+    <rect x="30" y="-18" width="360" height="40" rx="20" fill="#DFF3FC"/>
+    <text class="chip" x="210" y="7" text-anchor="middle">AZURE · RG-VCRUZEIRO · BRAZIL SOUTH</text>
+
+    <g transform="translate(34 58)" filter="url(#shadow)">
+      <rect class="azure-card" width="292" height="566" rx="26"/>
+      <image x="98" y="37" width="96" height="96" href="icons/storage-account.svg" xlink:href="icons/storage-account.svg"/>
+      <text class="section" x="146" y="177" text-anchor="middle">Dados operacionais</text>
+      <text class="label" x="146" y="211" text-anchor="middle">Data Lake Storage Gen2</text>
+      <text class="body" x="146" y="242" text-anchor="middle">dlvcruzeiro</text>
+      <line x1="30" y1="272" x2="262" y2="272" stroke="#C7E0EC"/>
+      <rect x="30" y="304" width="232" height="54" rx="16" fill="#E3F4FB"/>
+      <text class="chip" x="146" y="328" text-anchor="middle">RAW</text>
+      <text class="small" x="146" y="348" text-anchor="middle">fontes + destinatários</text>
+      <rect x="30" y="374" width="232" height="54" rx="16" fill="#E3F4FB"/>
+      <text class="chip" x="146" y="398" text-anchor="middle">REFERENCE</text>
+      <text class="small" x="146" y="418" text-anchor="middle">cadastro de filiais</text>
+      <rect x="30" y="444" width="232" height="54" rx="16" fill="#E3F4FB"/>
+      <text class="chip" x="146" y="468" text-anchor="middle">OUTPUT</text>
+      <text class="small" x="146" y="488" text-anchor="middle">relatórios PDF</text>
+      <text class="small" x="146" y="535" text-anchor="middle">Acesso via identidade gerenciada</text>
+    </g>
+
+    <path d="M340 341 L398 341" stroke="#168BC4" stroke-width="5" fill="none" marker-end="url(#arrow)"/>
+
+    <g transform="translate(410 58)" filter="url(#shadow)">
+      <rect class="azure-card" width="350" height="566" rx="26"/>
+      <image x="127" y="34" width="96" height="96" href="icons/azure-functions.svg" xlink:href="icons/azure-functions.svg"/>
+      <text class="section" x="175" y="174" text-anchor="middle">Processamento</text>
+      <text class="label" x="175" y="208" text-anchor="middle">Azure Functions</text>
+      <text class="body" x="175" y="238" text-anchor="middle">Python 3.11 · Flex Consumption</text>
+      <line x1="32" y1="268" x2="318" y2="268" stroke="#C7E0EC"/>
+      <g transform="translate(36 302)">
+        <circle cx="7" cy="7" r="5" fill="#15A9DE"/><text class="body" x="25" y="13">Timer diário</text>
+        <circle cx="7" cy="49" r="5" fill="#15A9DE"/><text class="body" x="25" y="55">Leitura e consolidação</text>
+        <circle cx="7" cy="91" r="5" fill="#15A9DE"/><text class="body" x="25" y="97">Regras de frete final</text>
+        <circle cx="7" cy="133" r="5" fill="#15A9DE"/><text class="body" x="25" y="139">Indicadores por filial</text>
+        <circle cx="7" cy="175" r="5" fill="#15A9DE"/><text class="body" x="25" y="181">PDF protegido por CPF</text>
+      </g>
+      <rect x="32" y="510" width="286" height="34" rx="17" fill="#DDF3FC"/>
+      <text class="chip" x="175" y="532" text-anchor="middle">ORQUESTRAÇÃO PONTA A PONTA</text>
+    </g>
+
+    <path d="M774 341 L832 341" stroke="#168BC4" stroke-width="5" fill="none" marker-end="url(#arrow)"/>
+
+    <g transform="translate(844 58)">
+      <g filter="url(#shadow)">
+        <rect class="azure-card" width="192" height="170" rx="24"/>
+        <image x="20" y="35" width="64" height="64" href="icons/azure-openai.svg" xlink:href="icons/azure-openai.svg"/>
+        <text class="label" x="98" y="50">Azure</text>
+        <text class="label" x="98" y="75">OpenAI</text>
+        <text class="small" x="20" y="126">Comentários e resumo</text>
+        <text class="small" x="20" y="148">executivo humanizado</text>
+      </g>
+      <g transform="translate(0 198)" filter="url(#shadow)">
+        <rect class="azure-card" width="192" height="170" rx="24"/>
+        <image x="20" y="35" width="64" height="64" href="icons/application-insights.svg" xlink:href="icons/application-insights.svg"/>
+        <text x="98" y="50" style="font:700 15px 'Segoe UI';fill:#153C56">Application</text>
+        <text x="98" y="75" style="font:700 17px 'Segoe UI';fill:#153C56">Insights</text>
+        <text class="small" x="20" y="126">Execuções, falhas</text>
+        <text class="small" x="20" y="148">e rastreabilidade</text>
+      </g>
+      <g transform="translate(0 396)" filter="url(#shadow)">
+        <rect class="azure-card" width="192" height="170" rx="24"/>
+        <image x="20" y="35" width="64" height="64" href="icons/communication-services.svg" xlink:href="icons/communication-services.svg"/>
+        <text x="94" y="50" style="font:700 14px 'Segoe UI';fill:#153C56">Communication</text>
+        <text x="98" y="75" style="font:700 17px 'Segoe UI';fill:#153C56">Services</text>
+        <text class="small" x="20" y="126">Envio seguro por e-mail</text>
+        <text class="small" x="20" y="148">com retentativas</text>
+      </g>
+    </g>
+  </g>
+
+  <path d="M1533 551 L1591 551" stroke="#168BC4" stroke-width="5" fill="none" marker-end="url(#arrow)"/>
+
+  <g transform="translate(1604 236)" filter="url(#shadow)">
+    <rect class="card" width="234" height="630" rx="28"/>
+    <rect width="234" height="9" rx="5" fill="#0078D4"/>
+    <circle cx="117" cy="88" r="48" fill="#0078D4"/>
+    <path d="M86 75 L117 97 L148 75 M86 75 L86 108 L148 108 L148 75 Z" fill="none" stroke="#fff" stroke-width="6" stroke-linejoin="round"/>
+    <text class="section" x="117" y="174" text-anchor="middle">Destinatários</text>
+    <text class="body" x="117" y="210" text-anchor="middle">Gestores e responsáveis</text>
+    <text class="body" x="117" y="236" text-anchor="middle">por filial</text>
+    <line x1="28" y1="270" x2="206" y2="270" stroke="#D6E8F1"/>
+    <text class="label" x="117" y="316" text-anchor="middle">Relatório PDF</text>
+    <text class="small" x="117" y="348" text-anchor="middle">Indicadores operacionais</text>
+    <text class="small" x="117" y="373" text-anchor="middle">Análise executiva</text>
+    <text class="small" x="117" y="398" text-anchor="middle">Proteção por senha</text>
+    <rect x="28" y="448" width="178" height="92" rx="20" fill="#E8F6FC"/>
+    <text class="chip" x="117" y="481" text-anchor="middle">DECISÃO</text>
+    <text class="small" x="117" y="509" text-anchor="middle">Informação pronta</text>
+    <text class="small" x="117" y="531" text-anchor="middle">para ação</text>
+    <text class="small" x="117" y="592" text-anchor="middle">Entrega direta por e-mail</text>
+  </g>
+
+  <g transform="translate(82 950)">
+    <rect width="1756" height="72" rx="22" fill="#E4F4FB" stroke="#B7DDEB"/>
+    <text class="chip" x="54" y="44">IDENTIDADE GERENCIADA</text>
+    <circle cx="274" cy="36" r="4" fill="#168BC4"/>
+    <text class="chip" x="300" y="44">TLS 1.2</text>
+    <circle cx="410" cy="36" r="4" fill="#168BC4"/>
+    <text class="chip" x="436" y="44">PDF PROTEGIDO</text>
+    <circle cx="595" cy="36" r="4" fill="#168BC4"/>
+    <text class="chip" x="621" y="44">TELEMETRIA CENTRALIZADA</text>
+    <text class="small" x="1702" y="44" text-anchor="end">Arquitetura executiva · 2026</text>
+  </g>
+</svg>

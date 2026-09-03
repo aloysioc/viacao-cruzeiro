@@ -1,0 +1,21 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "resourceGroupName": {
+      "value": "rg-vcruzeiro-prd-brs-001"
+    },
+    "location": {
+      "value": "brazilsouth"
+    },
+    "tags": {
+      "value": {
+        "environment": "production",
+        "system": "viacao-cruzeiro-relatorios",
+        "owner": "PREENCHER_COM_RESPONSAVEL_DO_CLIENTE",
+        "costCenter": "PREENCHER_COM_CENTRO_DE_CUSTO",
+        "managedBy": "iac"
+      }
+    }
+  }
+}

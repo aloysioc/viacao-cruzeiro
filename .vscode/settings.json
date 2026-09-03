@@ -10,6 +10,10 @@
         "/^az monitor app-insights query --app func-VCruzeiro2 --resource-group RG-VCruzeiro --analytics-query \"union traces, requests, exceptions \\| where timestamp > ago\\(7d\\) \\| summarize traces=countif\\(itemType=='trace'\\), requests=countif\\(itemType=='request'\\), exceptions=countif\\(itemType=='exception'\\)\" -o json$/": {
             "approve": true,
             "matchCommandLine": true
+        },
+        "/^npm ping --registry=https://registry\\.npmjs\\.org/ && npm view azure-functions-core-tools@4 version --registry=https://registry\\.npmjs\\.org/$/": {
+            "approve": true,
+            "matchCommandLine": true
         }
     }
 }

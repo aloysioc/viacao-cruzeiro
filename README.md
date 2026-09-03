@@ -21,6 +21,20 @@ Projeto de Azure Functions (Python) para leitura de dados no Data Lake, geracao 
 - `.funcignore`: controle de arquivos no publish
 - `.gitignore`: artefatos locais e segredos fora do Git
 
+## Evolucao para Producao
+
+O repositorio esta sendo evoluido do LAB para uma base controlada de producao. A logica atual da Function permanece preservada enquanto a fundacao de governanca e infraestrutura e preparada.
+
+- `docs/PROJECT-SCHEDULE.md`: gates, marcos e estado de execucao;
+- `docs/OPEN-ITEMS.md`: pendencias e bloqueios por gate;
+- `docs/adr/`: decisoes de arquitetura;
+- `docs/runbooks/`: procedimentos operacionais;
+- `docs/evidence/`: evidencias de implantacao, sem segredos;
+- `infra/`: infraestrutura como codigo, organizada por gate;
+- `scripts/`: preflight, validacao, what-if e deploy.
+
+O primeiro template preparado e o Gate B (`infra/bootstrap/main.bicep`), que criara somente o Resource Group e tags aprovadas. Nenhum recurso Azure sera criado sem autorizacao explicita.
+
 ## Pre-requisitos
 
 1. Python 3.11

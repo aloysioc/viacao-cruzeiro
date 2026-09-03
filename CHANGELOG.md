@@ -1,5 +1,14 @@
 # CHANGELOG - Projeto Cruzeiro
 
+## [WIP] - 3 de Setembro de 2026
+
+### Preparacao para producao
+
+- Estruturacao inicial de governanca para evoluir o repositorio do LAB para producao.
+- Inclusao de cronograma por gates, pendencias controladas, ADRs, area de evidencias e base de runbooks.
+- Inclusao do esqueleto de infraestrutura como codigo para o Gate B: criacao do Resource Group e tags, sem deploy executado.
+- Separacao de artefatos de documentacao, infraestrutura, testes e pipelines do pacote de publicacao da Azure Function.
+
 ## [WIP] - 1 de Junho de 2026
 
 ### 🚀 Regra de Expedidos x Recebidos (alinhada com cliente)

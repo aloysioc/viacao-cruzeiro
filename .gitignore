@@ -72,3 +72,10 @@ wheelhouse/
 
 # Local project inputs and generated reports
 _infos/
+
+# Local infrastructure parameters and deployment artifacts
+.azure/
+infra/parameters/*.parameters.json
+!infra/parameters/*.parameters.example.json
+infra/parameters/*.local.json
+infra/parameters/*.deployment.json
