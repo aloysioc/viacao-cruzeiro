@@ -2,6 +2,7 @@
     "azureFunctions.deploySubpath": ".",
     "azureFunctions.scmDoBuildDuringDeployment": false,
     "azureFunctions.pythonVenv": ".venv311",
+    "python.defaultInterpreterPath": "${workspaceFolder}\\.venv311\\Scripts\\python.exe",
     "azureFunctions.projectLanguage": "Python",
     "azureFunctions.projectRuntime": "~4",
     "debug.internalConsoleOptions": "neverOpen",
@@ -15,5 +16,34 @@
             "approve": true,
             "matchCommandLine": true
         }
-    }
+    },
+    "workbench.colorCustomizations": {
+        "activityBar.activeBackground": "#6ec0e6",
+        "activityBar.activeBorder": "#15202b",
+        "activityBar.background": "#6ec0e6",
+        "activityBar.foreground": "#15202b",
+        "activityBar.inactiveForeground": "#15202b99",
+        "activityBarBadge.background": "#d926a0",
+        "activityBarBadge.foreground": "#e7e7e7",
+        "activityBarTop.activeBackground": "#6ec0e6",
+        "activityBarTop.activeBorder": "#15202b",
+        "activityBarTop.background": "#6ec0e6",
+        "activityBarTop.foreground": "#15202b",
+        "activityBarTop.inactiveForeground": "#15202b99",
+        "commandCenter.border": "#15202b99",
+        "commandCenter.foreground": "#15202b",
+        "sash.hoverBorder": "#6ec0e6",
+        "statusBar.background": "#43adde",
+        "statusBar.debuggingBackground": "#43adde",
+        "statusBar.debuggingForeground": "#15202b",
+        "statusBar.foreground": "#15202b",
+        "statusBarItem.hoverBackground": "#2496ca",
+        "statusBarItem.remoteBackground": "#fae4f3",
+        "statusBarItem.remoteForeground": "#15202b",
+        "titleBar.activeBackground": "#43adde",
+        "titleBar.activeForeground": "#15202b",
+        "titleBar.inactiveBackground": "#43adde99",
+        "titleBar.inactiveForeground": "#15202b99"
+    },
+    "peacock.color": "#43adde"
 }
